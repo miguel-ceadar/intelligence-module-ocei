@@ -28,6 +28,7 @@ from intelligence.api.schemas import (
     TrainRequest,
     TrainResponse,
 )
+from intelligence.contracts import InputSpec
 from intelligence.models.base import ModelAdapter
 
 logger = logging.getLogger(__name__)
@@ -117,6 +118,7 @@ class BaseTask:
     model_adapter: ModelAdapter
     data_loader: Callable[[StaticDataSource], dict]
     bento_name: str | None = None
+    input_spec: InputSpec | None = None
     _cached_model: Any = field(default=None, init=False, repr=False)
 
     def __post_init__(self) -> None:
@@ -166,11 +168,19 @@ class BaseTask:
             )
         components = self.data_loader(req.data_source)
         components["model_parameters"] = req.model_parameters
-        bento, metrics = self.model_adapter.train(components, self.bento_name)
+        # Inject the input_spec into the saved Bento's custom_objects so
+        # the contract travels with the model — see plan §2.4.
+        extras = {"input_spec": self.input_spec} if self.input_spec is not None else None
+        bento, metrics = self.model_adapter.train(components, self.bento_name, extras)
         self._invalidate()
         return TrainResponse(model_tag=str(bento.tag), metrics=metrics)
 
     def predict(self, req: PredictRequest) -> PredictResponse:
+        # Validate request against the contract BEFORE loading the model —
+        # cheap rejection of obviously-bad requests, no Bento fetch needed.
+        if self.input_spec is not None:
+            self.input_spec.validate(req.input_series)
+
         model = self._load_model()
         if model is None:
             raise FileNotFoundError(

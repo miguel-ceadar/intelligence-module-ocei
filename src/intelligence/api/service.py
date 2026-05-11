@@ -17,27 +17,35 @@ from __future__ import annotations
 
 import logging
 import os
+from pathlib import Path
 
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import JSONResponse
 
 from intelligence import __version__
 from intelligence.api.schemas import PredictRequest, TrainRequest
+from intelligence.config import load_config
 from intelligence.tasks import TaskRegistry, build_registry_from_config
 
 logger = logging.getLogger(__name__)
 
 
-def _enabled_tasks_from_env() -> list[str]:
-    """Read enabled tasks from ``INTELLIGENCE_ENABLED_TASKS`` (comma-separated).
-
-    Phase-1 stop-gap. Task #10 wires this through the typed config layer.
-    """
-    raw = os.environ.get("INTELLIGENCE_ENABLED_TASKS", "cpu_forecast_arima")
-    return [t.strip() for t in raw.split(",") if t.strip()]
+def _load_app_config():
+    """Load typed config from ``INTELLIGENCE_CONFIG`` (path) or defaults."""
+    cfg_path = os.environ.get("INTELLIGENCE_CONFIG")
+    return load_config(Path(cfg_path) if cfg_path else None)
 
 
-registry = build_registry_from_config(_enabled_tasks_from_env())
+config = _load_app_config()
+registry = build_registry_from_config(config.intelligence.enabled_tasks)
+
+# Apply MLflow tracking URI if configured.
+if config.intelligence.mlflow.tracking_uri:
+    try:
+        import mlflow
+        mlflow.set_tracking_uri(config.intelligence.mlflow.tracking_uri)
+    except ImportError:
+        logger.warning("mlflow not installed; ignoring mlflow.tracking_uri config")
 
 app = FastAPI(title="Intelligence Utility", version="0.1.0.dev0")
 

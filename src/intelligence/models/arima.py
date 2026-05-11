@@ -32,7 +32,12 @@ class ArimaAdapter:
     def __init__(self, p: int = 5, d: int = 1, q: int = 0) -> None:
         self.default_params = {"p": p, "d": d, "q": q}
 
-    def train(self, components: dict, bento_name: str) -> tuple[Any, dict]:
+    def train(
+        self,
+        components: dict,
+        bento_name: str,
+        extras: dict | None = None,
+    ) -> tuple[Any, dict]:
         from intelligence.trainers import ModelTrainer
 
         order_params = {**self.default_params, **components.get("model_parameters", {})}
@@ -41,17 +46,20 @@ class ArimaAdapter:
         trainer = ModelTrainer(components_with_params)
         metrics, model, history, _y_test, _y_pred = trainer.train_arima()
 
+        custom_objects = {
+            "scaler_obj": components_with_params["scaler_obj"],
+            "historical_data": history,
+            "model_metrics": metrics,
+            "test_sample_size": len(components_with_params["X_test"]),
+            "arima_order": (order_params["p"], order_params["d"], order_params["q"]),
+            **(extras or {}),
+        }
+
         import bentoml
         bento = bentoml.picklable_model.save_model(
             bento_name,
             model,
-            custom_objects={
-                "scaler_obj": components_with_params["scaler_obj"],
-                "historical_data": history,
-                "model_metrics": metrics,
-                "test_sample_size": len(components_with_params["X_test"]),
-                "arima_order": (order_params["p"], order_params["d"], order_params["q"]),
-            },
+            custom_objects=custom_objects,
             signatures={"predict": {"batchable": True}},
         )
         return bento, _coerce_jsonable(metrics)

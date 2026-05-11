@@ -23,8 +23,18 @@ class ModelAdapter(Protocol):
     name: str          # short tag — 'arima', 'xgb', 'lstm'
     has_drift: bool    # whether this adapter ships drift detection
 
-    def train(self, components: dict, bento_name: str) -> tuple[Any, dict]:
-        """Train, save Bento, return ``(bento_model, metrics_dict)``."""
+    def train(
+        self,
+        components: dict,
+        bento_name: str,
+        extras: dict | None = None,
+    ) -> tuple[Any, dict]:
+        """Train, save Bento, return ``(bento_model, metrics_dict)``.
+
+        ``extras`` is merged into the Bento's ``custom_objects`` — that's
+        how ``BaseTask`` injects task-level metadata (e.g. ``input_spec``)
+        without the adapter knowing what it is.
+        """
         ...
 
     def predict(self, bento_model: Any, input_series: dict[str, list[float]]) -> Any:
