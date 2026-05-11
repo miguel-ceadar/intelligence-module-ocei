@@ -20,37 +20,22 @@ from analytics.metrics import *
 from processing.utils import *
 
 from analytics.dataframes import PersistentDF
-from dataclay import Client
+from intelligence.adapters import dataclay_client
 
-def load_data(args,bentoml_logger, dataset_path):
-        if args.dataclay:
-            bentoml_logger.info("Collecting Raw data to/from dataclay")
-            try:
-                bentoml_logger.info("[DATACLAY] Connecting to Client..")
-                client = Client(proxy_host=args.dataclay_host, username=args.dataclay_hostname,
-                                password=args.dataclay_password, dataset=args.dataclay_dataset)
-                client.start()
-                bentoml_logger.info("[DATACLAY] connected to Client..")
-                metricsdf = PersistentDF(dataset_path)
-                metricsdf.make_persistent(alias=args.dataset_name)
-            except Exception as e:
-                bentoml_logger.exception(e)
-            # Read dataset from dataclay
+
+def load_data(args, bentoml_logger, dataset_path):
+    if args.dataclay:
+        bentoml_logger.info("Collecting Raw data to/from dataclay")
+        with dataclay_client(args):
+            metricsdf = PersistentDF(dataset_path)
+            metricsdf.make_persistent(alias=args.dataset_name)
             bentoml_logger.info("Read dataset as a dataframe")
             metrics_dataset = PersistentDF.get_by_alias(args.dataset_name)
             raw_data = pd.read_csv(metrics_dataset.content)
-            ## For multivariate data:
-            # N = 3
-            # raw_data = raw_data.iloc[:, :N]
-            # new_column_names = ['timestamp'] + [f'column_{i}' for i in range(1, N)]
-            # raw_data.columns = new_column_names
-
-            client.stop()
-
-        else:
-            bentoml_logger.info("Collecting raw data from local device")
-            raw_data = pd.read_csv(dataset_path)
-        return raw_data
+    else:
+        bentoml_logger.info("Collecting raw data from local device")
+        raw_data = pd.read_csv(dataset_path)
+    return raw_data
 
 
 def prep_data_components(X_train=None, X_test=None, y_train=None, y_test=None, scaler_obj=None, 

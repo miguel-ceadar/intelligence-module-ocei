@@ -32,7 +32,6 @@ from tqdm import tqdm as tqdm_progress
 from sklearn.preprocessing import StandardScaler, MinMaxScaler
 
 from dataset import root
-from dataclay import Client
 from processing.utils import *
 from analytics.dataframes import PersistentDF
 from analytics.model_metrics import ModelMetricsDataClay
@@ -53,12 +52,15 @@ class ModelTrain:
         self.metrics = {}
         self.results = {"Trained Model": "", "Dataset Splits": 0.2, "Results with test dataset": []}
         self.datasplit = {}
-
-        # Initialize MLFlow and other necessary tasks
-        bentoml_logger.info("Deleting mlruns stale folders")
-        os.system("mlflow gc")
+        # mlflow gc moved out of __init__ — see intelligence.trainers.mlflow_gc.
+        # Constructor stays side-effect-free; the gc runs once per train session
+        # at the top of initiate_train, preserving legacy cadence.
 
     def initiate_train(self):
+        from intelligence.trainers import mlflow_gc
+        bentoml_logger.info("Deleting mlruns stale folders")
+        mlflow_gc()
+
         # Save the dataset split info
         if self.args.test_size:
             self.datasplit["train_data"] = (1 - self.args.test_size) * 100

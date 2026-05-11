@@ -343,16 +343,19 @@ def train(input_data:TrainFeatures):
 
     # Federated learning block
     if input_data.use_federated:
-        from dataclay import Client
-        bentoml_logger.info(f"Connecting to dataclay client")
-        client = Client(proxy_host=input_data.dataclay_host, username=input_data.dataclay_hostname,
-                        password=input_data.dataclay_password, dataset=input_data.dataclay_dataset)
-        client.start()
-
+        from intelligence.adapters import DataClayConfig, dataclay_client
         if not input_data.federated_params:
             raise ValueError("Federated training is enabled, but no parameters were provided.")
-        bentoml_logger.info("Federated learning activated")
-        results = run_federated_learning(input_data.federated_params)
+        fl_dc_config = DataClayConfig(
+            enabled=True,
+            proxy_host=input_data.dataclay_host,
+            username=input_data.dataclay_hostname,
+            password=input_data.dataclay_password,
+            dataset=input_data.dataclay_dataset,
+        )
+        with dataclay_client(fl_dc_config):
+            bentoml_logger.info("Federated learning activated")
+            results = run_federated_learning(input_data.federated_params)
         return {"results": results}
 
     # Classic training

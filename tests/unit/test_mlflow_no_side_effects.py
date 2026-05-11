@@ -31,7 +31,6 @@ def test_modeltrain_init_does_not_invoke_mlflow_gc():
     os_system.assert_not_called()
 
 
-@pytest.mark.xfail(strict=True, reason="phase-1 task #6 pending — helper not yet extracted")
 def test_explicit_gc_helper_exists():
     """The legacy behaviour (gc on every train) becomes an opt-in helper."""
     gc = getattr(trainers, "mlflow_gc", None) or getattr(trainers, "gc_mlruns", None)
@@ -39,3 +38,26 @@ def test_explicit_gc_helper_exists():
         "Move the mlflow gc logic to a named helper (e.g. `intelligence.trainers.mlflow_gc`) "
         "so it can be invoked from a startup hook behind a config flag."
     )
+
+
+def test_mlflow_gc_invokes_mlflow_cli():
+    """The helper shells out to the ``mlflow`` CLI with ``gc`` as subcommand."""
+    from intelligence.trainers import mlflow_gc
+
+    with mock.patch("intelligence.trainers._mlflow.subprocess.run") as run:
+        run.return_value.returncode = 0
+        mlflow_gc()
+        run.assert_called_once()
+        cmd = run.call_args.args[0]
+        assert cmd[0] == "mlflow"
+        assert "gc" in cmd
+
+
+def test_mlflow_gc_tolerates_missing_cli():
+    """If ``mlflow`` isn't on PATH, the helper logs and returns rather than raising."""
+    from intelligence.trainers import mlflow_gc
+
+    with mock.patch(
+        "intelligence.trainers._mlflow.subprocess.run", side_effect=FileNotFoundError
+    ):
+        mlflow_gc()  # must not raise

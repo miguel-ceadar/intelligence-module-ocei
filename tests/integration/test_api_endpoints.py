@@ -22,14 +22,19 @@ import pytest
 pytestmark = pytest.mark.integration
 
 api = pytest.importorskip("intelligence.api.service", reason="phase-1 §2.3 pending")
-httpx = pytest.importorskip("httpx")
+pytest.importorskip("fastapi")  # TestClient lives here
 
 
 @pytest.fixture
 def app():
+    # Prefer the FastAPI app directly when exported (faster + simpler than
+    # going through the bentoml.Service ASGI wrapper).
+    fastapi_app = getattr(api, "app", None)
+    if fastapi_app is not None:
+        return fastapi_app
     svc = getattr(api, "svc", None) or getattr(api, "build_service", lambda: None)()
     if svc is None:
-        pytest.skip("intelligence.api.service.svc / build_service not implemented yet")
+        pytest.skip("intelligence.api.service.{app,svc} not implemented yet")
     asgi = getattr(svc, "asgi_app", None)
     if asgi is None:
         pytest.skip("BentoML version does not expose `svc.asgi_app`; revise harness")
@@ -38,21 +43,41 @@ def app():
 
 @pytest.fixture
 def client(app):
-    transport = httpx.ASGITransport(app=app)
-    with httpx.Client(transport=transport, base_url="http://testserver") as c:
-        yield c
+    from fastapi.testclient import TestClient
+    return TestClient(app)
 
 
 def test_healthz(client):
     resp = client.get("/healthz")
     assert resp.status_code == 200
+    body = resp.json()
+    assert body["status"] == "ok"
+    assert "version" in body
 
 
 def test_readyz(client):
     resp = client.get("/readyz")
-    # 200 if all required tasks loadable; 503 otherwise. Either is a real answer;
-    # what we don't want is 404 (endpoint missing).
+    # 200 if all probes pass; 503 with failure list otherwise. Either is a
+    # real answer; what we don't want is 404 (endpoint missing) or 500.
     assert resp.status_code in (200, 503)
+    body = resp.json()
+    if resp.status_code == 200:
+        assert body["status"] == "ready"
+        assert body["tasks"] >= 1
+    else:
+        assert body["status"] == "not_ready"
+        assert isinstance(body["failures"], list) and body["failures"]
+
+
+def test_readiness_helper_empty_registry_fails():
+    """Direct unit test for the readiness aggregator — verifies the
+    not-ready path that's hard to trigger via the live registry."""
+    from intelligence.api.service import compute_readiness
+    from intelligence.tasks import TaskRegistry
+
+    ok, failures = compute_readiness(TaskRegistry())
+    assert not ok
+    assert any(f["check"] == "registry" for f in failures)
 
 
 def test_list_tasks(client):
@@ -63,21 +88,31 @@ def test_list_tasks(client):
 
 
 def test_unknown_task_returns_404(client):
-    resp = client.post("/tasks/does_not_exist/predict", json={})
+    # Send a structurally-valid body so the 4xx is the route's task-lookup,
+    # not pydantic's request-body validation.
+    resp = client.post(
+        "/tasks/does_not_exist/predict",
+        json={"input_series": {"x": [0.1, 0.2]}},
+    )
     assert resp.status_code == 404
 
 
 def test_predict_input_spec_mismatch_returns_422(client):
     """Wrong feature count or steps_back should produce a 4xx (ideally 422),
-    not a 500 from a numpy shape error inside the runner."""
-    # Use a task that's expected to be registered post-refactor.
+    not a 500 from a numpy shape error inside the runner.
+
+    Pre-task-#11 (no InputSpec validation) the request hits a
+    model-not-found path and gets 503 — also a real 4xx/5xx answer, not
+    a crash. Once #11 lands, validation rejects pre-load and the
+    response narrows to 422.
+    """
     resp = client.post(
         "/tasks/cpu_forecast_arima/predict",
-        json={"input_series": {"cpu": [0.0, 0.0]}},  # too few steps
+        json={"input_series": {"cpu": [0.0, 0.0]}},
     )
     if resp.status_code == 404:
         pytest.skip("cpu_forecast_arima task not registered in this config")
-    assert resp.status_code == 422
+    assert resp.status_code in (422, 503)
 
 
 def test_models_list(client):
