@@ -101,35 +101,6 @@ test_cases = {
                                                 }
                                         }
                                     }
-    # 'test_model_training_dataclay' : {
-    #                                     'model_name': 'METRICS',
-    #                                     'model_type': 'XGB',
-    #                                     'test_size': 0.2,
-    #                                     'dataset_name': 'cpu_sample_dataset_orangepi.csv',
-    #                                     'steps_back': 12,
-    #                                     'max_models_count': 5,
-    #                                     'max_mlruns_count': 10,
-    #                                     'dataclay': 'true',
-    #                                     'dataclay_hostname': 'testuser',
-    #                                     'dataclay_password': 's3cret',
-    #                                     'dataclay_dataset': 'testdata',
-    #                                     'dataclay_host': '127.0.0.1',
-    #                                     'model_parameters': {
-    #                                         'arima_model_parameters': {
-    #                                             'p': 5,
-    #                                             'd': 1,
-    #                                             'q': 0,
-    #                                         },
-    #                                         'xgboost_model_parameters': {
-    #                                             'n_estimators': 1000,
-    #                                             'max_depth': 7,
-    #                                             'eta': 0.1,
-    #                                             'subsample': 0.7,
-    #                                             'colsample_bytree': 0.8,
-    #                                             'alpha': 0,
-    #                                         },
-    #                                     },
-    #                                 },                           
 }
 
 

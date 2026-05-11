@@ -1,0 +1,104 @@
+[build-system]
+requires = ["hatchling>=1.18"]
+build-backend = "hatchling.build"
+
+[project]
+name = "intelligence"
+version = "0.1.0.dev0"
+description = "AI coordination utility for the edge-cloud continuum (CeADAR fork of icos-project/intelligence-module)"
+readme = "README.md"
+requires-python = ">=3.10,<3.13"
+license = { text = "Apache-2.0" }
+authors = [
+  { name = "CeADAR Ireland" },
+]
+
+# Phase-1 dependency set: still serves every existing capability.
+# Phase-2 will trim NKUA/Tetragon/FL/DataClay-specific items (see
+# intelligence-utility-plan.v2.md §3.1, §5b).
+#
+# Cross-platform note: `dataclay`, `icos-fl`, and `flwr` are gated
+# into the optional `legacy` extra so a Mac dev loop can install
+# without them. The new `intelligence.*` code never imports them at
+# module-load time — they're behind `intelligence.adapters.dataclay_client`
+# which lazy-imports inside the helper.
+dependencies = [
+  "bentoml==1.1.11",
+  "pandas>=1.5.3",
+  "numpy>=1.24.4,<2",
+  "scikit-learn>=1.6.1",
+  "scipy>=1.10.1",
+  "statsmodels>=0.14.0",
+  "xgboost==1.7.6",  # phase-1 keeps legacy pin; 2.x has a numpy interop segfault on macOS arm64
+  "torch>=2.5.1",
+  "shap>=0.46.0",
+  "nannyml>=0.13.0",
+  "mlflow>=2.22.0",
+  "huggingface_hub>=0.20",
+  "pydantic>=2.11.0",
+  "pydantic-settings>=2.0",
+  "pyyaml>=6.0",
+  "requests>=2.31",
+  "tqdm>=4.65.0",
+  "matplotlib>=3.7.1",
+]
+
+[project.optional-dependencies]
+dev = [
+  "pytest>=8.0",
+  "pytest-cov>=5.0",
+  "ruff>=0.6",
+  "pre-commit>=3.7",
+  "httpx",  # ASGI test client for the BentoML service
+]
+
+# The legacy oasis/ tree pulls dataclay, icos-fl, flwr[simulation],
+# tensorflow-cpu, transformers — none of which we want in the lockfile
+# (kaleido / arm-mac wheel issues, dataclay needs a server, etc.).
+# If you actually need to run the legacy code path: `pip install
+# dataclay flwr 'tensorflow-cpu==2.15.0' transformers seaborn` manually.
+# Phase 2 deletes them all.
+
+[tool.uv]
+# nannyml pins kaleido==0.2.1.post1, which has no ARM-Mac wheel. Force a
+# newer kaleido that does. When phase 1's opt-in capability work lands
+# (§3.3) and nannyml moves behind a drift extra, this override can go.
+override-dependencies = ["kaleido>=1.0"]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/intelligence"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+src = ["src", "tests"]
+extend-exclude = ["oasis"]  # legacy tree, deleted at end of phase 1
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "N", "UP", "B", "SIM", "RUF"]
+ignore = [
+  "E501",   # line length is enforced by the formatter
+  "B008",   # FastAPI/BentoML use Depends(...) defaults pervasively
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["B011", "N802", "N803"]
+
+[tool.ruff.format]
+quote-style = "double"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra --strict-markers --strict-config"
+markers = [
+  "integration: spins up the BentoML service in-process; slower",
+  "slow: takes more than ~5 seconds",
+  "legacy: requires the optional `legacy` extra (dataclay, flwr, tensorflow)",
+]
+filterwarnings = [
+  "error",
+  # statsmodels/sklearn raise a lot of FutureWarnings on the pinned versions
+  "ignore::FutureWarning",
+  "ignore::DeprecationWarning",
+  "ignore::UserWarning",
+]

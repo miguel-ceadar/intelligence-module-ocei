@@ -129,39 +129,19 @@ if __name__ == "__main__":
     parser.add_argument('--test_size', default=0.2, help='define datasplit size')
     parser.add_argument('--shap_samples', default=100, help='deafult sample size for shap')
     parser.add_argument('--max_mlruns_count', default=10, help='count for mlruns')
-    
-    # parser.add_argument('--dataclay', default=True, help='True for using Dataclay, False otherwise')
-    
+
     parser.add_argument('--dataclay', default=False, help='True for using Dataclay, False otherwise')
     parser.add_argument('--dataclay_host', default="127.0.0.1", nargs='?', help='Define the host IP address')
     parser.add_argument('--dataclay_hostname', default="testuser", nargs='?', help='Define hostname')
     parser.add_argument('--dataclay_password', default="s3cret", nargs='?', help='Define password')
     parser.add_argument('--dataclay_dataset', default="testdata", nargs='?', help='Define dataset name')
-    
 
-    # # ARIMA
-    # parser.add_argument('--dataset_name', default='cpu_sample_dataset_orangepi.csv', help='Name of the dataset filename to use')
-    # parser.add_argument('--model_type', default='ARIMA', choices=['XGB', 'ARIMA'], help='Model type')
-    # parser.add_argument('--model_parameters', default={"arima_model_parameters": {"p":5, "d":1, "q":0}})
-    # parser.add_argument('--num_variables', default=1, help='Define the number of variables you will read from the dataset')
-
-    # XBOOST 
     parser.add_argument('--dataset_name', default='cpu_sample_dataset_orangepi.csv', help='Name of the dataset filename to use')
     parser.add_argument('--model_type', default='XGB', choices=['XGB', 'ARIMA', 'PYTORCH'], help='Model type')
-    parser.add_argument('--model_parameters', default={"xgboost_model_parameters": {"n_estimators":1000, "max_depth":7, "eta":0.1, "subsample":0.7, 
-                                                       "colsample_bytree":0.8, "alpha":0}}, help='Define model parameters')
+    parser.add_argument('--model_parameters', default={"xgboost_model_parameters": {"n_estimators": 1000, "max_depth": 7, "eta": 0.1, "subsample": 0.7,
+                                                       "colsample_bytree": 0.8, "alpha": 0}}, help='Define model parameters')
     parser.add_argument('--num_variables', default=1, help='Define the number of variables you will read from the dataset')
 
-    # PYTORCH
-    # parser.add_argument('--dataset_name', default='CPU_usage_data_joined.csv', help='Name of the dataset filename to use')
-    # parser.add_argument('--num_variables', default=5, help='Define the number of variables you will read from the dataset')
-    # parser.add_argument('--model_name', default='METRICS', choices=['CPU', 'METRICS'], help='Model type')
-    # parser.add_argument('--model_type', default='PYTORCH', choices=['XGB', 'ARIMA', 'PYTORCH'], help='Model type')
-    # parser.add_argument('--model_parameters', default={"pytorch_model_parameters": {"input_size":5, "output_size":5, "hidden_size": 64, 
-    #                                                                                 "num_epochs": 100, "quantize":False,"distill":False}})
-    # parser.add_argument('--batch_size', default=64, help='batch size')
-    # parser.add_argument('--device', default="cpu", help='gpu')
-    
     args = parser.parse_args()
     train = ModelTrain(args)
     results = train.initiate_train()
