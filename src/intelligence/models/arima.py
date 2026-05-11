@@ -18,15 +18,24 @@ logger = logging.getLogger(__name__)
 
 
 class ArimaAdapter:
+    """ARIMA model adapter.
+
+    Defaults are *per-instance*: two registered tasks both using ARIMA
+    can carry different baseline orders (e.g. ``cpu_forecast_arima``
+    with ``p=5`` and ``mem_forecast_arima`` with ``p=3``) without
+    subclassing or per-request overrides.
+    """
+
     name = "arima"
     has_drift = True
 
-    DEFAULT_PARAMS = {"p": 5, "d": 1, "q": 0}
+    def __init__(self, p: int = 5, d: int = 1, q: int = 0) -> None:
+        self.default_params = {"p": p, "d": d, "q": q}
 
     def train(self, components: dict, bento_name: str) -> tuple[Any, dict]:
         from intelligence.trainers import ModelTrainer
 
-        order_params = {**self.DEFAULT_PARAMS, **components.get("model_parameters", {})}
+        order_params = {**self.default_params, **components.get("model_parameters", {})}
         components_with_params = {**components, "model_parameters": order_params}
 
         trainer = ModelTrainer(components_with_params)
@@ -59,7 +68,7 @@ class ArimaAdapter:
         history = list(bento_model.custom_objects.get("historical_data", []))
         order = tuple(bento_model.custom_objects.get(
             "arima_order",
-            (self.DEFAULT_PARAMS["p"], self.DEFAULT_PARAMS["d"], self.DEFAULT_PARAMS["q"]),
+            (self.default_params["p"], self.default_params["d"], self.default_params["q"]),
         ))
 
         from statsmodels.tsa.arima.model import ARIMA

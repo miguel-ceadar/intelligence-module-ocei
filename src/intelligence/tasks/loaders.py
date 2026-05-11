@@ -2,7 +2,7 @@
 
 Phase 2 will introduce ``intelligence.adapters.telemetry.PrometheusSource``
 alongside these. Both will produce the same ``data_components`` shape so
-``ForecastTask`` doesn't care which side it came from.
+``BaseTask`` doesn't care which side it came from.
 
 Loaders are classes (not closures) so they can carry an ``is_ready()``
 probe — the readiness endpoint asks each task's loader whether its

@@ -1,12 +1,12 @@
-"""Task abstraction — see ``base.Task`` and ``base.TaskRegistry``.
+"""Task abstraction — see ``base.Task`` (Protocol) and ``base.BaseTask`` (concrete).
 
-Concrete task types live alongside (``forecast.ForecastTask``); the
-catalog of named factories is in ``catalog``. Importing this package
-does NOT trigger the catalog; that happens lazily when
+Concrete task instances are built by factories in ``catalog``. Importing
+this package does NOT trigger the catalog; that happens lazily when
 ``build_registry_from_config`` is called.
 """
 
 from intelligence.tasks.base import (
+    BaseTask,
     Task,
     TaskRegistry,
     build_registry_from_config,
@@ -15,6 +15,7 @@ from intelligence.tasks.base import (
 )
 
 __all__ = [
+    "BaseTask",
     "Task",
     "TaskRegistry",
     "build_registry_from_config",
