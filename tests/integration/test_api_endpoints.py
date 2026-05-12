@@ -121,11 +121,10 @@ def test_models_list(client):
 
 
 def test_train_endpoint_accepts_static_data_source(client):
-    """Phase-1 train contract: body carries a `data_source` descriptor.
+    """Train contract: body carries a ``data_source`` descriptor.
 
-    Phase 1 only implements ``kind: "static"`` (read from ``oasis/dataset/``).
-    Phase 2 adds ``kind: "prometheus"`` against PromQL — same endpoint
-    signature, no breaking change for callers.
+    ``kind: "static"`` reads from the configured samples directory;
+    ``kind: "prometheus"`` pulls a window from PromQL.
     """
     body = {
         "data_source": {

@@ -2,20 +2,24 @@
 
 from intelligence.config.settings import (
     AppConfig,
-    DataClayConfig,
+    BootstrapConfig,
     IntelligenceConfig,
     MlflowConfig,
     ModelRepoConfig,
+    PrometheusConfig,
+    TaskConfig,
     TelemetryConfig,
     load_config,
 )
 
 __all__ = [
     "AppConfig",
-    "DataClayConfig",
+    "BootstrapConfig",
     "IntelligenceConfig",
     "MlflowConfig",
     "ModelRepoConfig",
+    "PrometheusConfig",
+    "TaskConfig",
     "TelemetryConfig",
     "load_config",
 ]

@@ -72,6 +72,8 @@ def test_task_registry_filtered_by_enabled_set():
     build = getattr(tasks, "build_registry_from_config", None)
     if build is None:
         pytest.skip("intelligence.tasks.build_registry_from_config not implemented yet")
-    reg = build(enabled_tasks=["cpu_forecast_arima"])
+    from intelligence.config.settings import IntelligenceConfig
+
+    reg = build(IntelligenceConfig(enabled_tasks=["cpu_forecast_arima"]))
     assert "cpu_forecast_arima" in list(reg)
     assert "anomaly_nkua_clf_cell0" not in list(reg)

@@ -1,8 +1,6 @@
-"""Phase-1 §2.1: src layout, no sys.path hacks, all subpackages importable.
-
-These tests guard against regression once the layout lands. They run even
-before the refactor — most pass on the empty package skeleton, the grep
-test will fail until the legacy ``oasis/`` tree is migrated and removed.
+"""Layout regression guards: src layout, no sys.path hacks, all
+subpackages importable, no lingering imports from the deleted
+``oasis/`` tree.
 """
 
 from __future__ import annotations
@@ -13,13 +11,14 @@ from pathlib import Path
 import pytest
 
 INTELLIGENCE_SUBPACKAGES = [
-    "intelligence.adapters",
     "intelligence.api",
     "intelligence.config",
-    "intelligence.contracts",
+    "intelligence.ml",
+    "intelligence.ml.models",
+    "intelligence.ml.trainers",
     "intelligence.tasks",
-    "intelligence.trainers",
-    "intelligence.utils",
+    "intelligence.tasks.contracts",
+    "intelligence.telemetry",
 ]
 
 
@@ -45,7 +44,8 @@ def test_no_sys_path_append_in_intelligence(src_root: Path):
 
 
 def test_no_oasis_imports_inside_intelligence(src_root: Path):
-    """The ``oasis/`` tree is legacy. New code must not depend on it."""
+    """Regression guard: nothing in ``intelligence`` should reach back
+    to the deleted ``oasis/`` tree (e.g. via a stray copy-paste)."""
     offenders: list[str] = []
     for path in src_root.rglob("*.py"):
         text = path.read_text(encoding="utf-8")

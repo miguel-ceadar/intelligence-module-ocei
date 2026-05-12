@@ -1,10 +1,10 @@
-"""Phase-1 §2.2: ``ModelTrainer`` extracted from ``ModelMetricsDataClay``.
+"""``ModelTrainer`` contract.
 
-Contract:
-- It's a plain class, not a ``DataClayObject``.
+Regression guards:
+- It's a plain class — no ``DataClayObject`` base in the MRO.
 - Methods are not ``@activemethod``-decorated.
-- ``train_xgb`` / ``train_arima`` / ``train_pytorch`` keep the same return
-  shapes the compilers expect today.
+- ``train_xgb`` / ``train_arima`` / ``train_pytorch`` return the
+  shapes the ``Model`` adapters in ``intelligence.ml.models`` expect.
 """
 
 from __future__ import annotations
@@ -13,13 +13,13 @@ from pathlib import Path  # noqa: F401 — kept for the slow LSTM test below
 
 import pytest
 
-trainers = pytest.importorskip("intelligence.trainers", reason="phase-1 §2.2 pending")
+trainers = pytest.importorskip("intelligence.ml.trainers", reason="phase-1 §2.2 pending")
 
 
 def _maybe(name: str):
     obj = getattr(trainers, name, None)
     if obj is None:
-        pytest.skip(f"intelligence.trainers.{name} not implemented yet")
+        pytest.skip(f"intelligence.ml.trainers.{name} not implemented yet")
     return obj
 
 
@@ -94,8 +94,7 @@ def test_train_pytorch_returns_metrics_and_model(sample_csv_multivariate: Path):
     a DataLoader-friendly dataset. Marked slow because it actually runs an
     LSTM for a couple of epochs."""
     pytest.importorskip("torch")
-    ModelTrainer = _maybe("ModelTrainer")
-    # The exact fixture build will lift code from `oasis.processing.process`
-    # once the trainer extraction lands. Until then this test is a placeholder
-    # spec — the assertion is on the return shape, not the numbers.
-    pytest.skip("pending: depends on ModelTrainer.train_pytorch land + tensor fixture build-out")
+    # Placeholder until the multivariate tensor fixture is built out;
+    # the LSTM happy-path is covered by ``test_lstm_model.py`` via
+    # ``make_lstm_prepare`` on synthetic data.
+    pytest.skip("pending: multivariate tensor fixture for ModelTrainer.train_pytorch")

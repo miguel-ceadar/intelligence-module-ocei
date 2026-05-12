@@ -1,0 +1,48 @@
+# Caches that bust layer reuse for no benefit
+**/__pycache__
+**/*.py[cod]
+**/.pytest_cache
+**/.ruff_cache
+**/.mypy_cache
+
+# Local venv — the image builds its own under .venv/
+.venv
+venv
+env
+
+# VCS / IDE
+.git
+.gitignore
+.github
+.vscode
+.idea
+.DS_Store
+
+# Tests don't ship in the runtime image; the smoke suite runs from outside
+tests/
+
+# Markdown isn't needed in the runtime image — except README.md, which
+# pyproject references as the package readme and hatchling reads at build time.
+*.md
+!README.md
+
+# Build artefacts
+build/
+dist/
+*.egg-info/
+htmlcov/
+.coverage*
+
+# Local secrets / overrides
+.env
+.env.local
+config.local.yaml
+
+# uv lockfile is not committed; if it exists locally we still rebuild deps inside the image
+uv.lock
+
+# Docker itself / compose configs (image doesn't need them — they're for the host)
+Dockerfile
+.dockerignore
+docker-compose.yml
+compose/

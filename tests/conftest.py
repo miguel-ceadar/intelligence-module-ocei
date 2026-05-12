@@ -34,17 +34,17 @@ def src_root(repo_root: Path) -> Path:
 
 
 @pytest.fixture(scope="session")
-def oasis_root(repo_root: Path) -> Path:
-    return repo_root / "oasis"
+def samples_dir(repo_root: Path) -> Path:
+    return repo_root / "src" / "intelligence" / "data" / "samples"
 
 
 @pytest.fixture(scope="session")
-def sample_csv_univariate(repo_root: Path) -> Path:
+def sample_csv_univariate(samples_dir: Path) -> Path:
     """Single-feature CPU CSV — used for ARIMA and XGB happy-path training."""
-    return repo_root / "oasis" / "dataset" / "cpu_sample_dataset_orangepi.csv"
+    return samples_dir / "cpu_sample_dataset_orangepi.csv"
 
 
 @pytest.fixture(scope="session")
-def sample_csv_multivariate(repo_root: Path) -> Path:
+def sample_csv_multivariate(samples_dir: Path) -> Path:
     """CPU+MEM CSV — used for the LSTM happy-path training."""
-    return repo_root / "oasis" / "dataset" / "node_3_utilisation_sample_dataset.csv"
+    return samples_dir / "node_3_utilisation_sample_dataset.csv"

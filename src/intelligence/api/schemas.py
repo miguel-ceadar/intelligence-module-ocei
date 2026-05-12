@@ -8,10 +8,10 @@ from pydantic import BaseModel, Field
 
 
 class StaticDataSource(BaseModel):
-    """Phase-1 data source: read a CSV from the legacy ``oasis/dataset/`` directory."""
+    """Static data source: read a CSV from the configured samples directory."""
 
     kind: Literal["static"]
-    name: str = Field(..., description="CSV filename in oasis/dataset/")
+    name: str = Field(..., description="CSV filename in the configured samples directory")
 
 
 class PrometheusDataSource(BaseModel):
@@ -52,3 +52,16 @@ class TaskInfo(BaseModel):
     name: str
     model_type: str
     has_drift: bool
+
+
+class ModelSyncRequest(BaseModel):
+    action: Literal["push", "pull"]
+    model_tag: str
+    repo_id: str | None = None    # defaults to config.intelligence.model_repo.repo_id
+    commit_message: str | None = None  # push only
+
+
+class ModelSyncResponse(BaseModel):
+    action: str
+    model_tag: str
+    repo_id: str

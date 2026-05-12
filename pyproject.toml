@@ -13,15 +13,6 @@ authors = [
   { name = "CeADAR Ireland" },
 ]
 
-# Phase-1 dependency set: still serves every existing capability.
-# Phase-2 will trim NKUA/Tetragon/FL/DataClay-specific items (see
-# intelligence-utility-plan.v2.md §3.1, §5b).
-#
-# Cross-platform note: `dataclay`, `icos-fl`, and `flwr` are gated
-# into the optional `legacy` extra so a Mac dev loop can install
-# without them. The new `intelligence.*` code never imports them at
-# module-load time — they're behind `intelligence.adapters.dataclay_client`
-# which lazy-imports inside the helper.
 dependencies = [
   "bentoml==1.1.11",
   "pandas>=1.5.3",
@@ -29,7 +20,7 @@ dependencies = [
   "scikit-learn>=1.6.1",
   "scipy>=1.10.1",
   "statsmodels>=0.14.0",
-  "xgboost==1.7.6",  # phase-1 keeps legacy pin; 2.x has a numpy interop segfault on macOS arm64
+  "xgboost==1.7.6",  # 2.x segfaults on macOS arm64 during numpy interop; pin stays until upstream fixes it
   "torch>=2.5.1",
   "shap>=0.46.0",
   "nannyml>=0.13.0",
@@ -53,27 +44,22 @@ dev = [
   "httpx",  # ASGI test client for the BentoML service
 ]
 
-# The legacy oasis/ tree pulls dataclay, icos-fl, flwr[simulation],
-# tensorflow-cpu, transformers — none of which we want in the lockfile
-# (kaleido / arm-mac wheel issues, dataclay needs a server, etc.).
-# If you actually need to run the legacy code path: `pip install
-# dataclay flwr 'tensorflow-cpu==2.15.0' transformers seaborn` manually.
-# Phase 2 deletes them all.
-
 [tool.uv]
-# nannyml pins kaleido==0.2.1.post1, which has no ARM-Mac wheel. Force a
-# newer kaleido that does. When phase 1's opt-in capability work lands
-# (§3.3) and nannyml moves behind a drift extra, this override can go.
+# nannyml pins kaleido==0.2.1.post1, which has no ARM-Mac wheel.
+# Forcing a newer kaleido that does until nannyml moves behind an
+# optional [drift] extra.
 override-dependencies = ["kaleido>=1.0"]
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/intelligence"]
 
+[tool.hatch.build.targets.wheel.force-include]
+"src/intelligence/data/samples" = "intelligence/data/samples"
+
 [tool.ruff]
 line-length = 100
 target-version = "py311"
 src = ["src", "tests"]
-extend-exclude = ["oasis"]  # legacy tree, deleted at end of phase 1
 
 [tool.ruff.lint]
 select = ["E", "F", "W", "I", "N", "UP", "B", "SIM", "RUF"]
@@ -90,16 +76,19 @@ quote-style = "double"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-addopts = "-ra --strict-markers --strict-config"
+# Smoke tests need a running compose stack — excluded by default. Run with
+# `pytest -m smoke` (or `make smoke` / `make e2e`).
+addopts = "-ra --strict-markers --strict-config -m 'not smoke'"
 markers = [
   "integration: spins up the BentoML service in-process; slower",
   "slow: takes more than ~5 seconds",
-  "legacy: requires the optional `legacy` extra (dataclay, flwr, tensorflow)",
+  "smoke: end-to-end against a running compose stack; requires docker compose up",
 ]
 filterwarnings = [
   "error",
   # statsmodels/sklearn raise a lot of FutureWarnings on the pinned versions
   "ignore::FutureWarning",
   "ignore::DeprecationWarning",
+  "ignore::PendingDeprecationWarning",  # bentoml -> multipart -> python_multipart rename
   "ignore::UserWarning",
 ]

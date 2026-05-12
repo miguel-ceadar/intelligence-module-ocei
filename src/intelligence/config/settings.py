@@ -18,9 +18,10 @@ additive and don't break existing config files.
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Literal
 
 import yaml
-from pydantic import BaseModel
+from pydantic import BaseModel, Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -29,26 +30,89 @@ class MlflowConfig(BaseModel):
     auto_gc: bool = False
 
 
-class DataClayConfig(BaseModel):
-    """Phase-2 deletion target. Kept so the legacy ``oasis/`` path stays
-    configurable during the transition."""
-
-    enabled: bool = False
-
-
 class ModelRepoConfig(BaseModel):
-    """Hugging Face model push/pull settings. Endpoint not wired in
-    phase 1 — placeholder so phase-2 add is additive."""
+    """Hugging Face model push/pull settings.
+
+    The HF token is intentionally not in this schema — it's read from
+    the ``HF_TOKEN`` environment variable at request time so secrets
+    don't end up in YAML config or ConfigMaps.
+    """
 
     hf_enabled: bool = False
+    repo_id: str | None = None
+
+
+class PrometheusConfig(BaseModel):
+    """Connection + auth + per-task PromQL queries.
+
+    The query for each task lives here (not in the request body) — the
+    operator wires the data source once, callers just say
+    ``kind: "prometheus"`` with a window/step.
+
+    Auth: ``token_env`` reads a bearer token from an environment variable
+    at call time; ``token_file`` reads it from a file path. Pick one,
+    not both. TLS verify can be skipped for inside-cluster traffic.
+    """
+
+    endpoint: str
+    token_env: str | None = None
+    token_file: str | None = None
+    tls_skip_verify: bool = False
+    timeout: float = 30.0
+    queries: dict[str, str] = Field(default_factory=dict)
+
+    @model_validator(mode="after")
+    def _one_auth_method(self) -> "PrometheusConfig":
+        if self.token_env and self.token_file:
+            raise ValueError(
+                "prometheus auth: set token_env or token_file, not both"
+            )
+        return self
 
 
 class TelemetryConfig(BaseModel):
-    """Phase-2 placeholder. Only ``source: static`` is meaningful today;
-    phase 2 adds ``prometheus`` / ``thanos`` / ``otel`` plus their
-    auth/endpoint/query fields."""
+    """Where the data comes from. ``static`` reads CSVs from the bundled
+    samples directory; ``prometheus`` queries PromQL via
+    ``PrometheusConfig``.
+    """
 
-    source: str = "static"
+    source: Literal["static", "prometheus"] = "static"
+    prometheus: PrometheusConfig | None = None
+
+    @model_validator(mode="after")
+    def _prometheus_block_required_when_selected(self) -> "TelemetryConfig":
+        if self.source == "prometheus" and self.prometheus is None:
+            raise ValueError(
+                "telemetry.source='prometheus' requires the telemetry.prometheus block"
+            )
+        return self
+
+
+class BootstrapConfig(BaseModel):
+    """Per-task auto-train on startup.
+
+    When enabled, the service spawns a background coroutine on startup
+    that calls ``task.train(...)`` against the configured data source.
+    ``/readyz`` reports the task as not-ready until bootstrap completes.
+
+    The ``window`` / ``step`` fields apply to ``telemetry.source =
+    prometheus``; ``dataset_name`` applies to ``static``. Default is
+    off — operators opt in explicitly so a bad PromQL query doesn't
+    silently block startup.
+    """
+
+    auto_train_on_startup: bool = False
+    dataset_name: str | None = None    # static mode
+    window: str | None = None          # prometheus mode
+    step: str | None = None            # prometheus mode
+
+
+class TaskConfig(BaseModel):
+    """Per-task config — currently just the bootstrap block. Reserved as
+    the home for future per-task knobs (e.g. ``allow_unverified_models``).
+    """
+
+    bootstrap: BootstrapConfig = BootstrapConfig()
 
 
 class IntelligenceConfig(BaseSettings):
@@ -69,9 +133,9 @@ class IntelligenceConfig(BaseSettings):
 
     enabled_tasks: list[str] = ["cpu_forecast_arima"]
     mlflow: MlflowConfig = MlflowConfig()
-    dataclay: DataClayConfig = DataClayConfig()
     model_repo: ModelRepoConfig = ModelRepoConfig()
     telemetry: TelemetryConfig = TelemetryConfig()
+    tasks: dict[str, TaskConfig] = Field(default_factory=dict)
 
     @classmethod
     def settings_customise_sources(

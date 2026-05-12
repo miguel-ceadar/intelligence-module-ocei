@@ -29,8 +29,6 @@ def config_yaml(tmp_path: Path) -> Path:
         intelligence:
           enabled_tasks:
             - cpu_forecast_arima
-          dataclay:
-            enabled: false
           mlflow:
             tracking_uri: http://localhost:5000
             auto_gc: false
@@ -82,3 +80,64 @@ def test_config_env_var_override(monkeypatch, config_yaml: Path):
     monkeypatch.setenv("INTELLIGENCE_MLFLOW__TRACKING_URI", "http://override:5000")
     cfg = load(config_yaml)
     assert cfg.intelligence.mlflow.tracking_uri == "http://override:5000"
+
+
+# ---- Phase 2: telemetry.prometheus -----------------------------------
+
+
+def test_config_loads_prometheus_block(tmp_path: Path):
+    load = _maybe("load_config")
+    p = tmp_path / "prom.yaml"
+    p.write_text(
+        """
+        intelligence:
+          enabled_tasks: [cpu_forecast_arima]
+          telemetry:
+            source: prometheus
+            prometheus:
+              endpoint: http://prom.monitoring.svc:9090
+              token_env: PROM_TOKEN
+              tls_skip_verify: false
+              queries:
+                cpu_forecast_arima: 100 - avg(rate(node_cpu_seconds_total{mode="idle"}[5m])) * 100
+        """.strip()
+    )
+    cfg = load(p)
+    telemetry = cfg.intelligence.telemetry
+    assert telemetry.source == "prometheus"
+    assert telemetry.prometheus is not None
+    assert telemetry.prometheus.endpoint == "http://prom.monitoring.svc:9090"
+    assert telemetry.prometheus.token_env == "PROM_TOKEN"
+    assert "cpu_forecast_arima" in telemetry.prometheus.queries
+
+
+def test_config_rejects_prometheus_source_without_block(tmp_path: Path):
+    """A config that says ``source: prometheus`` but omits the block must
+    fail at load time — operators shouldn't discover the misconfig on the
+    first prometheus request."""
+    load = _maybe("load_config")
+    p = tmp_path / "bad-prom.yaml"
+    p.write_text(
+        """
+        intelligence:
+          enabled_tasks: [cpu_forecast_arima]
+          telemetry:
+            source: prometheus
+        """.strip()
+    )
+    with pytest.raises(Exception):  # ValidationError
+        load(p)
+
+
+def test_config_unknown_telemetry_source_rejected(tmp_path: Path):
+    load = _maybe("load_config")
+    p = tmp_path / "bad-source.yaml"
+    p.write_text(
+        """
+        intelligence:
+          telemetry:
+            source: otel  # not yet supported
+        """.strip()
+    )
+    with pytest.raises(Exception):
+        load(p)

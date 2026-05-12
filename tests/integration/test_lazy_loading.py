@@ -19,10 +19,13 @@ def test_importing_api_does_not_load_any_bento_models():
     """Sniff ``bentoml.<framework>.get`` for the duration of the import."""
     bentoml = pytest.importorskip("bentoml")
 
-    # Drop a clean slate so the import actually runs.
-    for mod in list(sys.modules):
-        if mod.startswith("intelligence.api"):
-            del sys.modules[mod]
+    # Force ``intelligence.api.service`` to re-execute its module body so
+    # the bentoml.get patches below actually see the calls (if any).
+    # Only the service module — purging ``intelligence.api.schemas`` too
+    # would replace ``PrometheusDataSource`` / ``StaticDataSource`` with
+    # fresh classes, breaking ``isinstance`` checks in code that already
+    # imported them (e.g. ``intelligence.tasks.loaders``).
+    sys.modules.pop("intelligence.api.service", None)
 
     patches = []
     calls: list[str] = []

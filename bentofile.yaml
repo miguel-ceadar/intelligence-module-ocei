@@ -1,0 +1,48 @@
+service: "intelligence.api.service:svc"
+
+description: |
+  Intelligence Utility — a small AI coordination service for the
+  edge-cloud continuum (CeADAR Ireland, UCD). Trains and serves models
+  against telemetry, exposed as a single HTTP API. Tasks are opt-in
+  and compose ``(data_loader, model)``.
+
+labels:
+  owner: CeADAR
+  stage: dev
+
+include:
+  - "src/intelligence/**/*.py"
+  - "src/intelligence/data/samples/*"
+
+exclude:
+  - "**/__pycache__/"
+  - "**/*.pyc"
+  - "tests/"
+
+python:
+  packages:
+    - "bentoml==1.1.11"
+    - "pandas>=1.5.3"
+    - "numpy>=1.24.4,<2"
+    - "scikit-learn>=1.6.1"
+    - "scipy>=1.10.1"
+    - "statsmodels>=0.14.0"
+    - "xgboost==1.7.6"
+    - "torch>=2.5.1"
+    - "shap>=0.46.0"
+    - "nannyml>=0.13.0"
+    - "mlflow>=2.22.0"
+    - "huggingface_hub>=0.20"
+    - "pydantic>=2.11.0"
+    - "pydantic-settings>=2.0"
+    - "pyyaml>=6.0"
+    - "fastapi>=0.100"
+    - "requests>=2.31"
+    - "tqdm>=4.65.0"
+    - "matplotlib>=3.7.1"
+
+docker:
+  distro: debian
+  python_version: "3.11"
+  system_packages:
+    - libgomp1   # xgboost native runtime dep

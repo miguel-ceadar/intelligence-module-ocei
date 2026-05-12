@@ -23,7 +23,13 @@ from fastapi import FastAPI, HTTPException
 from fastapi.responses import JSONResponse
 
 from intelligence import __version__
-from intelligence.api.schemas import PredictRequest, TrainRequest
+from intelligence.api.model_repo import pull_from_hf, push_to_hf
+from intelligence.api.schemas import (
+    ModelSyncRequest,
+    ModelSyncResponse,
+    PredictRequest,
+    TrainRequest,
+)
 from intelligence.config import load_config
 from intelligence.tasks import TaskRegistry, build_registry_from_config
 
@@ -37,7 +43,7 @@ def _load_app_config():
 
 
 config = _load_app_config()
-registry = build_registry_from_config(config.intelligence.enabled_tasks)
+registry = build_registry_from_config(config.intelligence)
 
 # Apply MLflow tracking URI if configured.
 if config.intelligence.mlflow.tracking_uri:
@@ -48,6 +54,26 @@ if config.intelligence.mlflow.tracking_uri:
         logger.warning("mlflow not installed; ignoring mlflow.tracking_uri config")
 
 app = FastAPI(title="Intelligence Utility", version="0.1.0.dev0")
+
+
+@app.on_event("startup")
+async def _bootstrap_tasks_on_startup() -> None:
+    """Spawn bootstrap coroutines for every task whose config has
+    ``auto_train_on_startup: true``. State is flipped to ``running``
+    synchronously so ``/readyz`` returns 503 even before the event loop
+    ticks the coroutine.
+    """
+    import asyncio
+
+    from intelligence.tasks.bootstrap import bootstrap_task
+
+    for name in registry:
+        task = registry.get(name)
+        task_cfg = config.intelligence.tasks.get(name)
+        if task_cfg is None or not task_cfg.bootstrap.auto_train_on_startup:
+            continue
+        task.bootstrap_state = "running"
+        asyncio.create_task(bootstrap_task(task, config.intelligence))
 
 
 @app.get("/healthz")
@@ -63,6 +89,9 @@ def compute_readiness(reg: TaskRegistry) -> tuple[bool, list[dict]]:
       - registry has at least one task (otherwise the service is useless)
       - bento store is queryable (otherwise train/predict will fail)
       - each task's own ``is_ready`` (e.g. data source reachable)
+      - each task's bootstrap state — ``running``/``failed`` blocks
+        readiness (``pending`` means bootstrap isn't configured for
+        that task, which is fine).
     """
     failures: list[dict] = []
 
@@ -77,6 +106,19 @@ def compute_readiness(reg: TaskRegistry) -> tuple[bool, list[dict]]:
 
     for name in reg:
         task = reg.get(name)
+        boot_state = getattr(task, "bootstrap_state", None)
+        if boot_state == "running":
+            failures.append({
+                "check": f"task:{name}",
+                "detail": "bootstrap in progress",
+            })
+        elif boot_state == "failed":
+            err = getattr(task, "bootstrap_error", "unknown")
+            failures.append({
+                "check": f"task:{name}",
+                "detail": f"bootstrap failed: {err}",
+            })
+
         probe = getattr(task, "is_ready", None)
         if probe is None:
             continue
@@ -130,13 +172,48 @@ def train(task_name: str, req: TrainRequest):
     try:
         result = task.train(req)
     except NotImplementedError as e:
-        # Phase-2 features (e.g. kind='prometheus' before TelemetrySource lands).
+        # Defensive: a model adapter signalling an unsupported parameter.
         return JSONResponse(status_code=501, content={"detail": str(e)})
     except FileNotFoundError as e:
         raise HTTPException(status_code=404, detail=str(e)) from e
     except (ValueError, TypeError) as e:
         raise HTTPException(status_code=422, detail=str(e)) from e
     return result.model_dump()
+
+
+@app.post("/models/sync")
+def sync_model(req: ModelSyncRequest):
+    """Push a local Bento to HF or pull one from HF into the local store.
+
+    Requires ``model_repo.hf_enabled`` in config (operator opt-in) and
+    ``HF_TOKEN`` in the environment (read lazily by ``model_repo.*``).
+    A pulled Bento that lacks ``input_spec`` is *still refused* by predict
+    by default — see plan §3.5 and ``BaseTask._verify_bento``.
+    """
+    cfg = config.intelligence.model_repo
+    if not cfg.hf_enabled:
+        raise HTTPException(
+            status_code=403,
+            detail="model_repo.hf_enabled is false in config",
+        )
+    repo_id = req.repo_id or cfg.repo_id
+    if not repo_id:
+        raise HTTPException(
+            status_code=422,
+            detail="repo_id missing — set it in config or in the request body",
+        )
+    try:
+        if req.action == "push":
+            tag = push_to_hf(req.model_tag, repo_id, commit_message=req.commit_message)
+        else:
+            tag = pull_from_hf(req.model_tag, repo_id)
+    except PermissionError as e:
+        raise HTTPException(status_code=401, detail=str(e)) from e
+    except FileNotFoundError as e:
+        raise HTTPException(status_code=404, detail=str(e)) from e
+    except (ValueError, TypeError) as e:
+        raise HTTPException(status_code=422, detail=str(e)) from e
+    return ModelSyncResponse(action=req.action, model_tag=tag, repo_id=repo_id).model_dump()
 
 
 @app.post("/tasks/{task_name}/predict")

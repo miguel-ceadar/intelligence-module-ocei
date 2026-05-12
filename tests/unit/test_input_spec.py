@@ -11,13 +11,13 @@ import pickle
 
 import pytest
 
-contracts = pytest.importorskip("intelligence.contracts", reason="phase-1 §2.4 pending")
+contracts = pytest.importorskip("intelligence.tasks.contracts", reason="phase-1 §2.4 pending")
 
 
 def _import_or_skip(name: str):
     obj = getattr(contracts, name, None)
     if obj is None:
-        pytest.skip(f"intelligence.contracts.{name} not implemented yet")
+        pytest.skip(f"intelligence.tasks.contracts.{name} not implemented yet")
     return obj
 
 

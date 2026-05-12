@@ -1,0 +1,56 @@
+# Local stack for dev + smoke testing.
+#   docker compose up -d --build --wait
+#   make smoke            # exercises all four tasks against this stack
+#   docker compose down -v
+
+services:
+  intelligence:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: intelligence-utility:dev
+    ports:
+      - "3000:3000"
+    environment:
+      INTELLIGENCE_CONFIG: /etc/intelligence/intelligence.yaml
+    volumes:
+      - ./compose/intelligence.yaml:/etc/intelligence/intelligence.yaml:ro
+      - intelligence-bentoml:/var/lib/bentoml
+    depends_on:
+      prometheus:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000/healthz"]
+      interval: 2s
+      timeout: 2s
+      retries: 60
+      start_period: 5s
+
+  prometheus:
+    image: prom/prometheus:v2.54.1
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+      - --storage.tsdb.retention.time=1h
+      - --web.listen-address=:9090
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./compose/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+    depends_on:
+      - node-exporter
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:9090/-/healthy"]
+      interval: 2s
+      timeout: 1s
+      retries: 30
+
+  node-exporter:
+    image: prom/node-exporter:v1.8.2
+    command:
+      - --web.listen-address=:9100
+    expose:
+      - "9100"
+
+volumes:
+  intelligence-bentoml:

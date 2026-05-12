@@ -4,7 +4,7 @@ Construction is side-effect free. The BentoML model is fetched on first
 predict and cached for subsequent calls. Training invalidates the cache
 so the next predict picks up the freshly-saved model.
 
-Unit-level — uses mocks for the adapter, loader, and ``bentoml.get``;
+Unit-level — uses mocks for the model, loader, and ``bentoml.get``;
 no real BentoML store interaction. The end-to-end sanity check (real
 ARIMA train + predict round-trip) lives in
 ``tests/integration/test_api_endpoints.py``.
@@ -24,15 +24,15 @@ from intelligence.api.schemas import (
 from intelligence.tasks import BaseTask
 
 
-def _make_adapter(predict_return: float = 0.42):
-    a = mock.MagicMock()
-    a.name = "fake"
-    a.has_drift = False
-    a.predict.return_value = predict_return
+def _make_model(predict_return: float = 0.42):
+    m = mock.MagicMock()
+    m.name = "fake"
+    m.has_drift = False
+    m.predict.return_value = predict_return
     fake_bento = mock.MagicMock()
     fake_bento.tag = "fake:v1"
-    a.train.return_value = (fake_bento, {"mae": 0.1})
-    return a
+    m.train.return_value = (fake_bento, {"mae": 0.1})
+    return m
 
 
 def _make_loader():
@@ -47,7 +47,7 @@ def _make_loader():
 def task():
     return BaseTask(
         name="t_lazy",
-        model_adapter=_make_adapter(),
+        model=_make_model(),
         data_loader=_make_loader(),
     )
 
@@ -91,6 +91,29 @@ def test_train_invalidates_cache(task):
 
         task.predict(PredictRequest(input_series={"x": [1.0]}))
         assert get.call_count == 2
+
+
+def test_train_no_longer_raises_for_prometheus_descriptor():
+    """``BaseTask.train`` must not hardcode a ``StaticDataSource`` check —
+    dispatch is the loader's job. The loader either accepts the descriptor
+    or raises ``ValueError`` (which the API translates to 422).
+    """
+    from intelligence.api.schemas import PrometheusDataSource
+
+    # A loader that accepts any descriptor and returns trivial components.
+    fake_loader = mock.MagicMock(return_value={
+        "X_train": [[1.0]],
+        "X_test": [[2.0]],
+        "scaler_obj": mock.MagicMock(),
+    })
+
+    t = BaseTask(name="t", model=_make_model(), data_loader=fake_loader)
+    result = t.train(TrainRequest(
+        data_source=PrometheusDataSource(kind="prometheus", window="1h", step="1m"),
+        model_parameters={},
+    ))
+    assert result.model_tag == "fake:v1"
+    fake_loader.assert_called_once()
 
 
 def test_predict_raises_filenotfound_when_no_model_in_store(task):

@@ -1,0 +1,13 @@
+# Prometheus scrape config for the local compose stack.
+# Tight scrape interval so the smoke suite has enough samples to train
+# against within a minute or two of stack boot.
+
+global:
+  scrape_interval: 2s
+  evaluation_interval: 15s
+  scrape_timeout: 1s
+
+scrape_configs:
+  - job_name: node
+    static_configs:
+      - targets: ["node-exporter:9100"]

@@ -1,0 +1,20 @@
+# Intelligence Utility — config for the local compose stack.
+# Enables all four tasks and points them at the in-stack Prometheus.
+# The query aggregates CPU rate across all cores into a single fractional
+# series, which matches each task's InputSpec value_range = [0.0, 1.0].
+
+intelligence:
+  enabled_tasks:
+    - cpu_forecast_arima
+    - cpu_forecast_xgb
+    - cpu_forecast_lstm
+    - cpu_forecast_arima_drift
+  telemetry:
+    source: prometheus
+    prometheus:
+      endpoint: http://prometheus:9090
+      queries:
+        cpu_forecast_arima: 'avg(rate(node_cpu_seconds_total{mode!="idle"}[30s]))'
+        cpu_forecast_xgb: 'avg(rate(node_cpu_seconds_total{mode!="idle"}[30s]))'
+        cpu_forecast_lstm: 'avg(rate(node_cpu_seconds_total{mode!="idle"}[30s]))'
+        cpu_forecast_arima_drift: 'avg(rate(node_cpu_seconds_total{mode!="idle"}[30s]))'
