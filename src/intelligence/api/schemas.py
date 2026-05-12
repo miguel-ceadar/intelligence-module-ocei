@@ -15,11 +15,26 @@ class StaticDataSource(BaseModel):
 
 
 class PrometheusDataSource(BaseModel):
-    """Phase-2 data source: PromQL window. Phase 1 returns 501 for this."""
+    """PromQL data source.
+
+    ``endpoint`` is an optional per-request override of the configured
+    Prometheus URL. Off by default at the service level; the operator
+    must set ``intelligence.telemetry.allow_endpoint_override: true``
+    for the loader to honour it. SSRF defense: an authenticated POST
+    /train can otherwise redirect outbound traffic anywhere.
+    """
 
     kind: Literal["prometheus"]
     window: str = Field(..., description="e.g. '24h'")
     step: str = Field(..., description="e.g. '1m'")
+    endpoint: str | None = Field(
+        default=None,
+        description=(
+            "Optional override of the configured Prometheus endpoint. "
+            "Honoured only when the service config sets "
+            "`telemetry.allow_endpoint_override: true`."
+        ),
+    )
 
 
 # Discriminated union — pydantic dispatches on `kind` and returns 422 on unknown values.

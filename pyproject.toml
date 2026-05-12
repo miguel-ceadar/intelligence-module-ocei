@@ -3,9 +3,9 @@ requires = ["hatchling>=1.18"]
 build-backend = "hatchling.build"
 
 [project]
-name = "intelligence"
-version = "0.1.0.dev0"
-description = "AI coordination utility for the edge-cloud continuum (CeADAR fork of icos-project/intelligence-module)"
+name = "icos-intelligence-ocei"
+version = "0.1.0"
+description = "CeADAR fork of icos-project/intelligence-module, adapted for the O-CEI continuum: forecasting and drift detection against generic Prometheus telemetry"
 readme = "README.md"
 requires-python = ">=3.10,<3.13"
 license = { text = "Apache-2.0" }

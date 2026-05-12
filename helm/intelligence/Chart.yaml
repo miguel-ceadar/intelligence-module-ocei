@@ -1,9 +1,10 @@
 apiVersion: v2
-name: intelligence
+name: icos-intelligence-ocei
 description: |
   Train and serve forecasting + drift-detection models against your existing
   Prometheus metrics. A small HTTP API that plugs into the monitoring you
   already run — no glue code, no separate training infra.
+  CeADAR Ireland's O-CEI iteration of the ICOS intelligence module.
 type: application
 version: 0.1.0
 appVersion: "0.1.0"
@@ -13,7 +14,10 @@ keywords:
   - prometheus
   - mlops
   - machine-learning
+  - icos
+  - ocei
 sources:
+  - https://github.com/miguel-ceadar/intelligence-module-ocei
   - https://github.com/icos-project/intelligence-module
 maintainers:
   - name: CeADAR Ireland

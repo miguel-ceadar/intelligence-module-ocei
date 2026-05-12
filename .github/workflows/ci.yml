@@ -1,0 +1,45 @@
+# Pull-request + push CI: run the unit + integration suites against
+# the committed lockfile so regressions land before tags do.
+#
+# Smoke tests are deselected by default (pyproject's pytest addopts)
+# because they need a running compose stack — they live in `make e2e`
+# instead. Tag pushes are intentionally skipped here; the release
+# workflow handles those.
+#
+# Lint gating is deferred: the tree has pre-existing ruff findings and
+# formatting drift that need a focused cleanup pass. Tracked separately;
+# see project memory.
+
+name: ci
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v3
+        with:
+          version: "0.5.11"
+          enable-cache: true
+          cache-dependency-glob: "uv.lock"
+
+      - name: Set up Python
+        run: uv python install 3.11
+
+      - name: Install (locked, with dev extra)
+        run: uv sync --locked --extra dev
+
+      - name: Test (unit + integration, smoke excluded by config)
+        run: uv run pytest

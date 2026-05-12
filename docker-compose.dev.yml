@@ -1,0 +1,12 @@
+# Contributor overlay — rebuild the intelligence image from local
+# sources instead of pulling the published GHCR image.
+#
+#   docker compose -f docker-compose.demo.yml -f docker-compose.dev.yml up -d --build --wait
+# or `make e2e-dev`.
+
+services:
+  intelligence:
+    image: icos-intelligence-ocei:dev
+    build:
+      context: .
+      dockerfile: Dockerfile

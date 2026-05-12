@@ -1,12 +1,14 @@
 # Demo config — used by `docker-compose.demo.yml` to point the service
-# at the in-stack Prometheus that the overlay spins up. Not for real
-# deployments; see `compose/intelligence.yaml` for the standalone template.
+# at the in-stack Prometheus the demo stack spins up. NOT a deployment
+# template: pilots deploy via Helm or `docker run` against THEIR
+# Prometheus. See the README.
 
 intelligence:
   telemetry:
     source: prometheus
     prometheus:
       endpoint: http://prometheus:9090
+    # allow_endpoint_override: false   # opt-in per-request override (SSRF surface; off by default)
 
   tasks:
     cpu_forecast_arima:

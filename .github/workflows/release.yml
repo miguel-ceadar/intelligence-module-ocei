@@ -1,0 +1,145 @@
+# Release: build + push the container image and Helm chart to GHCR.
+#
+# Triggers on a SemVer tag (`v0.1.0`, `v1.2.3`, etc.). Publishes:
+#   - Image:  ghcr.io/<owner>/icos-intelligence-ocei:<version>
+#             ghcr.io/<owner>/icos-intelligence-ocei:<major>.<minor>
+#             ghcr.io/<owner>/icos-intelligence-ocei:latest
+#   - Chart:  oci://ghcr.io/<owner>/charts/icos-intelligence-ocei:<version>
+#
+# The `<owner>` is the repository owner (resolved lowercase by github.repository_owner).
+# Multi-platform image: linux/amd64 + linux/arm64 via buildx + qemu.
+#
+# Required repository settings:
+#   - Settings → Actions → General → "Read and write permissions" enabled
+#     (or per-job `permissions:` below, which is preferred).
+#   - GHCR packages default to private on first push — flip to public on
+#     the package page after the first release if pilots should pull
+#     without auth.
+
+name: release
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: "Ref to build (commit, branch, or tag)"
+        required: false
+        default: ""
+
+permissions:
+  contents: read
+  packages: write
+
+env:
+  IMAGE_NAME: icos-intelligence-ocei
+  CHART_PATH: helm/intelligence
+
+jobs:
+  publish-image:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.ref || github.ref }}
+
+      - name: Lowercase owner
+        id: owner
+        run: echo "value=${OWNER,,}" >> "$GITHUB_OUTPUT"
+        env:
+          OWNER: ${{ github.repository_owner }}
+
+      - name: Set up QEMU (arm64 emulation)
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Derive image tags
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/${{ steps.owner.outputs.value }}/${{ env.IMAGE_NAME }}
+          tags: |
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=raw,value=latest,enable=${{ startsWith(github.ref, 'refs/tags/v') }}
+
+      - name: Build and push (multi-arch)
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  publish-chart:
+    runs-on: ubuntu-latest
+    needs: publish-image
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.ref || github.ref }}
+
+      - name: Lowercase owner
+        id: owner
+        run: echo "value=${OWNER,,}" >> "$GITHUB_OUTPUT"
+        env:
+          OWNER: ${{ github.repository_owner }}
+
+      - name: Set up Helm
+        uses: azure/setup-helm@v4
+        with:
+          version: v3.15.0
+
+      - name: Resolve chart version from git tag
+        id: chart_version
+        run: |
+          # Strip the leading 'v' so the tag matches the chart's SemVer.
+          # Tag-triggered: github.ref_name = vX.Y.Z; manual: derive from chart file.
+          if [[ "${GITHUB_REF}" == refs/tags/v* ]]; then
+            version="${GITHUB_REF#refs/tags/v}"
+          else
+            version=$(grep '^version:' "${{ env.CHART_PATH }}/Chart.yaml" | awk '{print $2}')
+          fi
+          echo "value=${version}" >> "$GITHUB_OUTPUT"
+
+      - name: Sync chart appVersion with the image tag
+        run: |
+          sed -i.bak \
+            -e "s/^version:.*/version: ${{ steps.chart_version.outputs.value }}/" \
+            -e "s/^appVersion:.*/appVersion: \"${{ steps.chart_version.outputs.value }}\"/" \
+            "${{ env.CHART_PATH }}/Chart.yaml"
+          rm "${{ env.CHART_PATH }}/Chart.yaml.bak"
+
+      - name: Lint chart
+        run: helm lint "${{ env.CHART_PATH }}"
+
+      - name: Package chart
+        run: helm package "${{ env.CHART_PATH }}" --destination dist/
+
+      - name: Log in to GHCR (Helm OCI)
+        run: |
+          echo "${{ secrets.GITHUB_TOKEN }}" \
+            | helm registry login ghcr.io --username "${{ github.actor }}" --password-stdin
+
+      - name: Push chart as OCI artifact
+        run: |
+          helm push \
+            "dist/${{ env.IMAGE_NAME }}-${{ steps.chart_version.outputs.value }}.tgz" \
+            "oci://ghcr.io/${{ steps.owner.outputs.value }}/charts"

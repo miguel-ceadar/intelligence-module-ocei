@@ -82,10 +82,20 @@ class TelemetryConfig(BaseModel):
     """Where the data comes from. ``static`` reads CSVs from the bundled
     samples directory; ``prometheus`` queries PromQL via
     ``PrometheusConfig``.
+
+    ``allow_endpoint_override`` lets a train request supply a per-call
+    Prometheus URL via ``data_source.endpoint``. Off by default: an
+    authenticated POST /train can otherwise redirect outbound traffic
+    anywhere (SSRF probe surface). Flip on per deployment when you
+    genuinely need to flip between Prometheus instances at request
+    time. The configured auth (``token_env`` / ``tls_skip_verify``)
+    carries through to the override — per-request auth overrides are
+    not in scope.
     """
 
     source: Literal["static", "prometheus"] = "static"
     prometheus: PrometheusConfig | None = None
+    allow_endpoint_override: bool = False
 
     @model_validator(mode="after")
     def _prometheus_block_required_when_selected(self) -> "TelemetryConfig":

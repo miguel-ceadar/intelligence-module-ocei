@@ -115,8 +115,8 @@ class PrometheusLoader:
 
     The PromQL query is fixed at task-registration time — operators don't
     pick arbitrary PromQL on every request. The descriptor only supplies
-    the window and step (and could be extended later with overrides like
-    ``end_offset``).
+    the window and step (and optionally an endpoint override when the
+    deployment opts in via ``allow_endpoint_override``).
 
     Args:
         source: Prometheus-shaped source. Required (no useful default).
@@ -126,6 +126,11 @@ class PrometheusLoader:
         value_col: name of the value column for the default prepare.
             For single-series PromQL results, the source returns
             ``["timestamp", "value"]`` — ``"value"`` is the default.
+        allow_endpoint_override: whether ``data_source.endpoint`` on the
+            request is honoured. Off by default (SSRF defense).
+        source_kwargs: how to rebuild a ``PrometheusSource`` for the
+            override path — configured auth + TLS carry through. ``None``
+            means override is not supported.
     """
 
     def __init__(
@@ -134,6 +139,8 @@ class PrometheusLoader:
         query: str,
         prepare: Callable[[pd.DataFrame], dict] | None = None,
         value_col: str | None = None,
+        allow_endpoint_override: bool = False,
+        source_kwargs: dict | None = None,
     ) -> None:
         self.source = source
         self.query = query
@@ -141,6 +148,8 @@ class PrometheusLoader:
         self.prepare = (
             prepare if prepare is not None else _make_univariate_prepare(value_col or "value")
         )
+        self.allow_endpoint_override = allow_endpoint_override
+        self._source_kwargs = source_kwargs or {}
 
     def __call__(self, descriptor: PrometheusDataSource) -> dict:
         if not isinstance(descriptor, PrometheusDataSource):
@@ -148,10 +157,12 @@ class PrometheusLoader:
                 f"PrometheusLoader expects PrometheusDataSource, "
                 f"got {type(descriptor).__name__}"
             )
+
+        source = self._resolve_source(descriptor)
         end = datetime.now(UTC)
         start = end - _parse_duration(descriptor.window)
         step = _parse_duration(descriptor.step)
-        df = self.source.fetch_range(self.query, start=start, end=end, step=step)
+        df = source.fetch_range(self.query, start=start, end=end, step=step)
         # Single-series PromQL responses always come back with a literal
         # "value" column. Rename to the task's feature name so downstream
         # prepares — and any column-name round-trip into a Bento's stored
@@ -159,6 +170,29 @@ class PrometheusLoader:
         if self.value_col is not None and "value" in df.columns:
             df = df.rename(columns={"value": self.value_col})
         return self.prepare(df)
+
+    def _resolve_source(self, descriptor: PrometheusDataSource) -> TelemetrySource:
+        """Pick the source to query: configured by default, override if
+        the request set one *and* the deployment opted in."""
+        override = getattr(descriptor, "endpoint", None)
+        if override is None:
+            return self.source
+        if not self.allow_endpoint_override:
+            raise ValueError(
+                "data_source.endpoint override sent, but this deployment "
+                "has telemetry.allow_endpoint_override=false. Flip it on "
+                "in the service config to enable per-request overrides "
+                "(SSRF: only do this on trusted clients)."
+            )
+        if not self._source_kwargs:
+            # Configured source wasn't built via the factory (e.g. injected
+            # in a unit test) — can't honour the override without knowing
+            # how to construct a fresh source.
+            raise ValueError(
+                "endpoint override requested but no source kwargs are "
+                "available to rebuild a PrometheusSource"
+            )
+        return PrometheusSource(**{**self._source_kwargs, "endpoint": override})
 
     def is_ready(self) -> tuple[bool, str]:
         probe = getattr(self.source, "is_ready", None)
@@ -172,10 +206,19 @@ def prometheus_loader(
     query: str,
     prepare: Callable[[pd.DataFrame], dict] | None = None,
     value_col: str | None = None,
+    allow_endpoint_override: bool = False,
+    source_kwargs: dict | None = None,
 ) -> PrometheusLoader:
     """Build a ``PrometheusLoader``. Thin wrapper for symmetry with
     ``static_csv_loader``."""
-    return PrometheusLoader(source=source, query=query, prepare=prepare, value_col=value_col)
+    return PrometheusLoader(
+        source=source,
+        query=query,
+        prepare=prepare,
+        value_col=value_col,
+        allow_endpoint_override=allow_endpoint_override,
+        source_kwargs=source_kwargs,
+    )
 
 
 def build_loader_for_task(
@@ -207,15 +250,21 @@ def build_loader_for_task(
                 f"no PromQL query for task {task_name!r}; "
                 "set `query:` on the task config block"
             )
-        source = PrometheusSource(
-            endpoint=prom.endpoint,
-            token_env=prom.token_env,
-            token_file=prom.token_file,
-            tls_skip_verify=prom.tls_skip_verify,
-            timeout=prom.timeout,
-        )
+        source_kwargs = {
+            "endpoint": prom.endpoint,
+            "token_env": prom.token_env,
+            "token_file": prom.token_file,
+            "tls_skip_verify": prom.tls_skip_verify,
+            "timeout": prom.timeout,
+        }
+        source = PrometheusSource(**source_kwargs)
         return prometheus_loader(
-            source=source, query=query, value_col=value_col, prepare=prepare,
+            source=source,
+            query=query,
+            value_col=value_col,
+            prepare=prepare,
+            allow_endpoint_override=cfg.telemetry.allow_endpoint_override,
+            source_kwargs=source_kwargs,
         )
 
     return static_csv_loader(value_col=value_col, prepare=prepare)

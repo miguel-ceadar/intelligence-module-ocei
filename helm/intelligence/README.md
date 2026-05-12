@@ -1,4 +1,4 @@
-# Intelligence Module — Helm chart
+# icos-intelligence-ocei — Helm chart
 
 Deploys the intelligence service to Kubernetes: Deployment, Service,
 ConfigMap (for the task YAML), optional Secret, optional PVC for the
@@ -6,19 +6,23 @@ BentoML model store, optional ServiceMonitor + retraining CronJob.
 
 ## Quick install
 
+The chart is published as an OCI artifact alongside the image. Pin to
+a release (`latest` drifts under you):
+
 ```bash
-helm install intelligence ./helm/intelligence \
-  --set image.tag=<your-tag> \
+helm install icos-intelligence-ocei \
+  oci://ghcr.io/miguel-ceadar/charts/icos-intelligence-ocei \
+  --version 0.1.0 \
   --set config.intelligence.telemetry.prometheus.endpoint=https://prom.example
 ```
 
-Or with a values file:
+Or with a local checkout + a values file:
 
 ```yaml
 # values.prod.yaml
 image:
-  repository: ghcr.io/yourorg/intelligence-utility
-  tag: v0.1.0
+  repository: ghcr.io/miguel-ceadar/icos-intelligence-ocei
+  tag: "0.1.0"   # leave empty to follow .Chart.AppVersion
 
 config:
   intelligence:
@@ -44,7 +48,7 @@ persistence:
 ```
 
 ```bash
-helm install intelligence ./helm/intelligence -f values.prod.yaml
+helm install icos-intelligence-ocei ./helm/intelligence -f values.prod.yaml
 ```
 
 Every value is documented inline in `values.yaml`. The most common

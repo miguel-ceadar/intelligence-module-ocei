@@ -1,18 +1,43 @@
-# Demo / smoke overlay. Adds Prometheus + node-exporter and swaps the
-# intelligence config to point at the in-stack Prometheus.
-# Usage:
-#   docker compose -f docker-compose.yml -f docker-compose.demo.yml up -d --wait
-# or `make up-demo` / `make e2e`.
+# Demo stack — pulls the published image and spins up an in-stack
+# Prometheus + node-exporter so you can see the API work in 3 minutes
+# against synthetic data. NOT a deployment template: pilots deploy via
+# the Helm chart (k8s) or `docker run` (single host) against their OWN
+# Prometheus. See the README for those recipes.
+#
+# Filename is `.demo.yml` (not `docker-compose.yml`) by design — there
+# is no standalone deployment compose, so we don't want `docker compose
+# up` in the repo root to pretend there is one. Invoke explicitly:
+#   docker compose -f docker-compose.demo.yml up -d --wait
+# or `make e2e`.
+#
+# Pin the image tag via INTELLIGENCE_TAG (default: latest).
+#
+# Contributors rebuilding from local sources: layer in the dev overlay,
+#   docker compose -f docker-compose.demo.yml -f docker-compose.dev.yml up -d --build --wait
+# or `make e2e-dev`.
 
 services:
   intelligence:
-    # Override the standalone config with the demo one (in-stack prom endpoint).
+    image: ghcr.io/miguel-ceadar/icos-intelligence-ocei:${INTELLIGENCE_TAG:-latest}
+    ports:
+      - "3000:3000"
+    environment:
+      INTELLIGENCE_CONFIG: /etc/intelligence/config.yaml
+    env_file:
+      - path: .env
+        required: false
     volumes:
       - ./compose/intelligence.demo.yaml:/etc/intelligence/config.yaml:ro
       - intelligence-bentoml:/var/lib/bentoml
     depends_on:
       prometheus:
         condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000/healthz"]
+      interval: 2s
+      timeout: 2s
+      retries: 60
+      start_period: 5s
 
   prometheus:
     image: prom/prometheus:v2.54.1
@@ -39,3 +64,6 @@ services:
       - --web.listen-address=:9100
     expose:
       - "9100"
+
+volumes:
+  intelligence-bentoml:

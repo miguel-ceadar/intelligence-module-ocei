@@ -1,10 +1,12 @@
 # Default values for the intelligence chart.
 # Override on `helm install` / `helm upgrade` with --set or -f <values-file>.
 
-# -- Container image. Override `image.tag` to pin a specific build.
+# -- Container image. Defaults to the published GHCR image; override
+# `image.tag` to pin a specific build (recommended — `latest` is for
+# the demo stack and drifts under you).
 image:
-  repository: intelligence-utility
-  tag: dev
+  repository: ghcr.io/miguel-ceadar/icos-intelligence-ocei
+  tag: ""           # falls back to .Chart.AppVersion when empty
   pullPolicy: IfNotPresent
 
 imagePullSecrets: []

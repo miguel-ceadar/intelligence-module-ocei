@@ -60,7 +60,7 @@ config = _load_app_config()
 registry = build_registry_from_config(config.intelligence)
 REGISTERED_TASKS.set(len(registry))
 
-app = FastAPI(title="Intelligence Utility", version="0.1.0.dev0")
+app = FastAPI(title="ICOS Intelligence (O-CEI)", version=__version__)
 # Order matters: ObservabilityMiddleware records every request including
 # 401s (which is useful — auth failures should be visible on /metrics).
 # Auth middleware therefore runs inside the observability one.

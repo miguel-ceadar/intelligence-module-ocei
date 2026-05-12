@@ -1,4 +1,4 @@
-# ICOS Intelligence Module
+# icos-intelligence-ocei
 
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://www.apache.org/licenses/LICENSE-2.0)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue.svg)](https://www.python.org/)
@@ -10,15 +10,15 @@
 
 Point the service at your Prometheus, list the PromQL queries for the
 metrics you care about, and you get `/train` + `/predict` endpoints per
-metric. ARIMA, XGBoost, LSTM, and NannyML drift detection ship out of
-the box; adding a new `(metric × algorithm)` pairing is one factory line
-in `src/intelligence/tasks/catalog.py`.
+metric. ARIMA (with native confidence intervals), XGBoost, LSTM, and
+NannyML drift detection ship out of the box. Adding a new
+`(metric × algorithm)` pairing is one YAML block under `tasks:`.
 
 Originally developed by **CeADAR Ireland** for the
 [ICOS metaOS project](https://github.com/icos-project/intelligence-module).
-This iteration relaxes the ICOS-specific coupling so the same service
-runs on any vanilla Kubernetes + Prometheus stack, beside or instead of
-the original ICOS deployment.
+This iteration is the O-CEI continuum take — relaxes the ICOS-specific
+coupling so the same service runs on any vanilla Kubernetes +
+Prometheus stack, beside or instead of the original ICOS deployment.
 
 ## What's included
 
@@ -38,30 +38,61 @@ Two data sources, picked once per deployment:
 
 ## Quick start
 
-### See it work (no setup)
+The deployable artefact is the container image at
+`ghcr.io/miguel-ceadar/icos-intelligence-ocei`. Two ways to consume it:
+Helm for Kubernetes, raw `docker run` for a single host. A self-
+contained demo lives in this repo for evaluators who want to see it
+work in 3 minutes — the demo bundles a throwaway Prometheus +
+node-exporter and is not a deployment template.
+
+### Deploy on Kubernetes (Helm)
+
+The chart is published as an OCI artifact. Pin to a release version
+(`latest` drifts under you):
+
+```bash
+helm install icos-intelligence-ocei \
+  oci://ghcr.io/miguel-ceadar/charts/icos-intelligence-ocei \
+  --version 0.1.0 \
+  -f your-values.yaml
+```
+
+Cluster-side it deploys a Deployment + Service + ConfigMap (the YAML
+config) + Secret (tokens) + PVC (Bento store) + optional ServiceMonitor
+and retraining CronJob. See the [chart README](helm/intelligence/README.md)
+for values and the multi-replica caveat.
+
+### Deploy on a single host (`docker run`)
+
+```bash
+docker run -d --name icos-intelligence-ocei \
+  -p 3000:3000 \
+  -e INTELLIGENCE_CONFIG=/etc/intelligence/config.yaml \
+  -e INTELLIGENCE_TELEMETRY__PROMETHEUS__ENDPOINT=https://prom.example.com \
+  -v "$PWD/config.yaml:/etc/intelligence/config.yaml:ro" \
+  -v intelligence-bentoml:/var/lib/bentoml \
+  ghcr.io/miguel-ceadar/icos-intelligence-ocei:0.1.0
+
+curl http://localhost:3000/healthz
+```
+
+Drop a `config.yaml` next to the command — start from any
+[`examples/*/config.yaml`](examples/) and edit the PromQL queries.
+Override the Prometheus endpoint via the env var as shown; same trick
+for any other field
+(`INTELLIGENCE_<SECTION>__<FIELD>` — see [Configuration](#configuration)).
+
+### See it work (in-repo demo, 3 minutes)
 
 ```bash
 make e2e
 ```
 
-Brings up the service alongside a sample Prometheus + node-exporter in
-Docker (~3 min the first time, image build included) and exercises
-train + predict on all four tasks. Use this to feel out the API before
-wiring it to your own infra. `make down-demo` tears it down.
-
-### Deploy against your Prometheus
-
-```bash
-cp .env.example .env
-# edit .env — set INTELLIGENCE_TELEMETRY__PROMETHEUS__ENDPOINT, plus
-# TOKEN_ENV + the token if your Prometheus needs auth.
-docker compose up -d --build --wait
-curl http://localhost:3000/healthz
-```
-
-`compose/intelligence.yaml` carries the task set and the PromQL queries.
-Edit `endpoint:` there for a permanent setting, or leave the placeholder
-and override via the env var — env wins.
+Pulls the published image, spins up a throwaway Prometheus +
+node-exporter, exercises train + predict on all four tasks, dumps logs
+on failure. `make down-demo` tears it down. Compose lives in this repo
+solely for this demo — pilots deploy via Helm or `docker run` against
+their own Prometheus.
 
 ### Local dev (no Docker)
 
@@ -70,16 +101,9 @@ uv sync
 uv run uvicorn intelligence.api.service:app --port 3000
 ```
 
-### Kubernetes (Helm)
-
-A Helm chart at [`helm/intelligence`](helm/intelligence/) installs the
-service alongside ConfigMap / Secret / PVC / optional ServiceMonitor +
-retraining CronJob. See the [chart README](helm/intelligence/README.md)
-for values and the multi-replica caveat.
-
-```bash
-helm install intelligence ./helm/intelligence -f your-values.yaml
-```
+Contributors hacking on the code who want the demo stack to run their
+local changes: `make e2e-dev` (rebuilds the image from source via the
+`docker-compose.dev.yml` overlay).
 
 ### Calling the API
 
@@ -147,32 +171,39 @@ can be overridden by an env var — `INTELLIGENCE_<SECTION>__<FIELD>`
 
 ```yaml
 intelligence:
-  enabled_tasks:
-    - cpu_forecast_arima
-    - cpu_forecast_xgb
-    - cpu_forecast_lstm
-    - cpu_forecast_arima_drift
   telemetry:
     source: static
+  tasks:
+    cpu_forecast_arima:
+      kind: arima
+      feature: cpu
+      value_range: [0.0, 1.0]
+      steps_back: 1
 ```
 
 ### Prometheus
 
 ```yaml
 intelligence:
-  enabled_tasks:
-    - cpu_forecast_arima
   telemetry:
     source: prometheus
     prometheus:
       endpoint: http://prometheus.monitoring.svc:9090
       token_env: PROM_TOKEN          # or token_file: /var/run/secrets/prom
       tls_skip_verify: false
-      queries:
-        cpu_forecast_arima: 'avg(rate(node_cpu_seconds_total{mode="user"}[1m]))'
+    allow_endpoint_override: false   # SSRF defense; flip on per deployment if you want
+                                     # `data_source.endpoint` overrides on train requests
+  tasks:
+    cpu_forecast_arima:
+      kind: arima
+      feature: cpu
+      value_range: [0.0, 1.0]
+      steps_back: 1
+      query: 'avg(rate(node_cpu_seconds_total{mode="user"}[1m]))'
 ```
 
-Train request switches to:
+Each task carries its own PromQL on the `query:` field. Train request
+shape:
 
 ```bash
 curl -X POST http://localhost:3000/tasks/cpu_forecast_arima/train \
@@ -180,9 +211,25 @@ curl -X POST http://localhost:3000/tasks/cpu_forecast_arima/train \
   -d '{"data_source": {"kind": "prometheus", "window": "24h", "step": "1m"}}'
 ```
 
-`enabled_tasks` is validated against the registered catalog at startup
-— typos fail loudly, not at first request. Same for `source: prometheus`
-without a `prometheus:` block.
+`source: prometheus` without a `prometheus:` block fails at startup,
+not at first request. Same for a prom-mode task without `query:`.
+
+#### Per-request endpoint override
+
+When `allow_endpoint_override: true`, a train request can flip the
+Prometheus endpoint for that single call:
+
+```bash
+curl -X POST http://localhost:3000/tasks/cpu_forecast_arima/train \
+  -d '{"data_source": {"kind": "prometheus", "window": "24h", "step": "1m",
+                       "endpoint": "https://other-prom.example:9090"}}'
+```
+
+The configured auth + TLS settings carry through to the override
+(per-request token rotation isn't in scope). Off by default — an
+authenticated POST /train can otherwise redirect outbound traffic
+anywhere, which is an SSRF probe surface. Flip on only for trusted
+client populations.
 
 ### Auto-train on startup
 
@@ -252,7 +299,7 @@ forecast wired up, you add a block under `tasks:` and pick a `kind:`.
 
 ### Add a task (no code)
 
-Drop a block into your `config.yaml` (or `compose/intelligence.yaml`):
+Drop a block into your `config.yaml`:
 
 ```yaml
 intelligence:
@@ -308,22 +355,29 @@ implementation, and add a branch in `build_loader_for_task`. See
 ## Layout
 
 ```
-src/intelligence/         the library
-├── api/                  FastAPI service + Pydantic schemas + HF push/pull
-├── tasks/                Task protocol + BaseTask + registry + loaders
-│   ├── builders/         one builder per algorithm kind (arima/xgb/lstm/drift)
-│   └── contracts/        per-task InputSpec
-├── telemetry/            TelemetrySource Protocol + StaticSource + PrometheusSource
+src/intelligence/            the library
+├── api/                     FastAPI service + Pydantic schemas + HF push/pull
+├── tasks/                   Task protocol + BaseTask + registry + loaders
+│   ├── builders/            one builder per algorithm kind (arima/xgb/lstm/drift)
+│   └── contracts/           per-task InputSpec
+├── telemetry/               TelemetrySource Protocol + StaticSource + PrometheusSource
 ├── ml/
-│   ├── models/           Model protocol + ArimaModel / XgbModel / LstmModel
-│   └── trainers/         ModelTrainer + LSTM defs + metrics + MLflow helper
-├── config/               typed config (pydantic-settings + YAML)
-└── data/samples/         bundled sample CSVs (ship with the wheel)
+│   ├── models/              Model protocol + ArimaModel / XgbModel / LstmModel
+│   └── trainers/            ModelTrainer + LSTM defs + metrics
+├── config/                  typed config (pydantic-settings + YAML)
+└── data/samples/            bundled sample CSVs (ship with the wheel)
 
-examples/                 ready-to-run task configurations
-├── cpu_forecast/         four kinds against a CPU PromQL
-├── mem_forecast/         four kinds against a memory PromQL
-└── energy_forecast/      template for Kepler-style power metrics
+examples/                    ready-to-run task configurations
+├── cpu_forecast/            four kinds against a CPU PromQL
+├── mem_forecast/            four kinds against a memory PromQL
+├── k8s_cluster_metrics/     node + pod metrics for kube-prometheus-stack
+└── energy_forecast/         template for Kepler-style power metrics
+
+helm/intelligence/           Helm chart (deployment surface)
+docker-compose.demo.yml      in-repo demo stack (image + bundled prom)
+docker-compose.dev.yml       contributor overlay (build image from src)
+compose/                     demo-only configs (intelligence.demo.yaml, prometheus.yml)
+.github/workflows/           release pipeline (image + OCI chart → GHCR)
 ```
 
 The four user-facing domains (tasks, api, telemetry, ml) map to the
@@ -335,10 +389,11 @@ architecture sketch in `modules.png`.
 make install-dev               # uv sync --extra dev
 make test                      # pytest (excludes smoke)
 make lint                      # ruff check + format
-make up / make down            # standalone compose (intelligence only)
-make up-demo / make down-demo  # demo overlay (adds in-stack prom + node-exporter)
+make up-demo / make down-demo  # demo stack (pulls GHCR image + bundled prom)
 make smoke                     # pytest -m smoke against whichever stack is running
-make e2e                       # one-shot: demo overlay + smoke, dumps logs on failure
+make e2e                       # one-shot: demo stack + smoke, dumps logs on failure
+make e2e-dev                   # same, but rebuilds the image from local sources
+make chart-lint                # helm lint the chart
 ```
 
 macOS arm64 quick notes:
