@@ -5,7 +5,7 @@
 [![DOI](https://img.shields.io/badge/DOI-10.1145%2F3721889.3721929-blue.svg)](https://doi.org/10.1145/3721889.3721929)
 
 > **CeADAR's adaptation of the [ICOS intelligence-module](https://github.com/icos-project/intelligence-module)
-> for the O-CEI continuum.** Same AI capabilities (forecasting, drift,
+> for more general setups** Same AI capabilities (forecasting, drift,
 > SHAP) — relaxed coupling so the service runs against generic
 > Prometheus-scraped telemetry on a vanilla k8s cluster, alongside (or
 > instead of) the original ICOS metaOS deployment.
@@ -186,7 +186,7 @@ silently block startup.
 
 ### Retraining
 
-Stays external. The service ships no in-process scheduler. Point a
+Stays external. The service ships no in-process scheduler at this stage. Point a
 `CronJob` at `POST /tasks/{task}/train` on whatever cadence makes
 sense for the deployment.
 
@@ -196,7 +196,7 @@ sense for the deployment.
 intelligence:
   model_repo:
     hf_enabled: true
-    repo_id: CeADAR/intelligence-bentos
+    repo_id: ICOS-AI/ICOS-AI_icos_models
 ```
 
 The HF token is read from `HF_TOKEN` at request time — not stored in
@@ -318,9 +318,6 @@ Smoke tests run against a live compose stack (see Quick start).
 
 macOS arm64 quick notes:
 - `brew install libomp` once — xgboost dlopens its native lib.
-- `xgboost==1.7.6` is pinned because 2.x segfaults during numpy interop.
-- `kaleido>=1.0` is forced via `[tool.uv] override-dependencies` because
-  nannyml pins a kaleido that has no ARM-Mac wheel.
 
 ## Provenance
 
