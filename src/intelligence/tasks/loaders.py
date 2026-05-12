@@ -134,6 +134,7 @@ class PrometheusLoader:
     ) -> None:
         self.source = source
         self.query = query
+        self.value_col = value_col
         self.prepare = (
             prepare if prepare is not None else _make_univariate_prepare(value_col or "value")
         )
@@ -148,6 +149,12 @@ class PrometheusLoader:
         start = end - _parse_duration(descriptor.window)
         step = _parse_duration(descriptor.step)
         df = self.source.fetch_range(self.query, start=start, end=end, step=step)
+        # Single-series PromQL responses always come back with a literal
+        # "value" column. Rename to the task's feature name so downstream
+        # prepares — and any column-name round-trip into a Bento's stored
+        # contract, e.g. drift's column_names — match the task's InputSpec.
+        if self.value_col is not None and "value" in df.columns:
+            df = df.rename(columns={"value": self.value_col})
         return self.prepare(df)
 
     def is_ready(self) -> tuple[bool, str]:

@@ -60,7 +60,6 @@ config.local.yaml
 .env.local
 
 # uv
-uv.lock
 .python-version
 
 # Working planning notes (kept locally; README.md is the real artefact)

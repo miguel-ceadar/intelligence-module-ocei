@@ -38,9 +38,6 @@ htmlcov/
 .env.local
 config.local.yaml
 
-# uv lockfile is not committed; if it exists locally we still rebuild deps inside the image
-uv.lock
-
 # Docker itself / compose configs (image doesn't need them — they're for the host)
 Dockerfile
 .dockerignore

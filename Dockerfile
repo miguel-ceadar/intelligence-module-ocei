@@ -1,36 +1,46 @@
 # syntax=docker/dockerfile:1.7
+#
+# Two-stage build per Astral's canonical uv-in-Docker pattern
+# (https://docs.astral.sh/uv/guides/integration/docker/).
+#
+# Stage 1 (builder): resolves uv.lock and installs deps + project into /app/.venv.
+# Stage 2 (runtime): copies only the venv onto a clean python:3.11-slim base.
+# Result: no apt build tooling, no uv binary, no sources in the runtime image.
+
+FROM python:3.11-slim AS builder
+
+COPY --from=ghcr.io/astral-sh/uv:0.5.11 /uv /usr/local/bin/uv
+
+WORKDIR /app
+
+ENV UV_LINK_MODE=copy \
+    UV_COMPILE_BYTECODE=1 \
+    UV_PYTHON_DOWNLOADS=never \
+    UV_NO_PROGRESS=1
+
+# Step 1: install deps without the project. This layer only invalidates when
+# pyproject.toml or uv.lock change, so source-only edits skip the dep install.
+COPY pyproject.toml uv.lock README.md ./
+RUN --mount=type=cache,target=/root/.cache/uv \
+    uv sync --locked --no-install-project --no-dev
+
+# Step 2: install the project itself, non-editable so /app/.venv is
+# self-contained and can be copied without src/ tagging along.
+COPY src/ ./src/
+RUN --mount=type=cache,target=/root/.cache/uv \
+    uv sync --locked --no-dev --no-editable
+
 
 FROM python:3.11-slim
 
-# libgomp1: xgboost native runtime. ca-certificates: HTTPS to Prometheus / HF.
-# curl: used by compose healthchecks against /healthz.
+# libgomp1: xgboost native runtime. curl: compose healthcheck. ca-certs: HTTPS.
 RUN apt-get update && apt-get install -y --no-install-recommends \
         libgomp1 \
         ca-certificates \
         curl \
     && rm -rf /var/lib/apt/lists/*
 
-# uv resolves and installs Python deps. Pinned for build reproducibility.
-COPY --from=ghcr.io/astral-sh/uv:0.5.11 /uv /usr/local/bin/uv
-
-WORKDIR /app
-
-# pyproject + sources are everything hatchling needs to build the wheel.
-# Copy README too — pyproject references it as the package readme.
-COPY pyproject.toml README.md ./
-COPY src/ ./src/
-
-ENV UV_LINK_MODE=copy \
-    UV_COMPILE_BYTECODE=1 \
-    UV_PYTHON_DOWNLOADS=never \
-    UV_NO_PROGRESS=1 \
-    UV_CACHE_DIR=/root/.cache/uv
-
-# BuildKit cache mount keeps uv's archive cache out of the image layer —
-# the venv is copied in (UV_LINK_MODE=copy), the cache itself stays mounted.
-# Without this the cache duplicates every wheel inside the final image.
-RUN --mount=type=cache,target=/root/.cache/uv \
-    uv sync --no-dev
+COPY --from=builder /app/.venv /app/.venv
 
 ENV PATH="/app/.venv/bin:${PATH}" \
     BENTOML_HOME=/var/lib/bentoml \
@@ -39,7 +49,4 @@ RUN mkdir -p /var/lib/bentoml
 
 EXPOSE 3000
 
-# uvicorn serves the FastAPI app. bentoml.Service mounts the same app for
-# its model-store machinery; the runner isn't used, so `bentoml serve` adds
-# no value over uvicorn here.
 CMD ["uvicorn", "intelligence.api.service:app", "--host", "0.0.0.0", "--port", "3000"]

@@ -44,7 +44,7 @@ def make_cpu_forecast_arima(cfg: "IntelligenceConfig") -> BaseTask:
     return BaseTask(
         name="cpu_forecast_arima",
         model=ArimaModel(),
-        data_loader=build_loader_for_task(cfg, "cpu_forecast_arima"),
+        data_loader=build_loader_for_task(cfg, "cpu_forecast_arima", value_col="cpu"),
         bento_name="metrics_utilization_model_arima",  # legacy compat
         input_spec=InputSpec(
             n_features=1,
@@ -68,6 +68,7 @@ def make_cpu_forecast_xgb(cfg: "IntelligenceConfig") -> BaseTask:
         data_loader=build_loader_for_task(
             cfg,
             "cpu_forecast_xgb",
+            value_col="cpu",
             prepare=make_xgb_prepare(look_back=look_back, num_variables=1),
         ),
         bento_name="metrics_utilization_model_xgb",  # legacy compat
@@ -94,6 +95,7 @@ def make_cpu_forecast_arima_drift(cfg: "IntelligenceConfig") -> BaseTask:
         data_loader=build_loader_for_task(
             cfg,
             "cpu_forecast_arima_drift",
+            value_col="cpu",
             prepare=make_drift_prepare(value_col=None),
         ),
         chunk_size=chunk_size,
@@ -119,6 +121,7 @@ def make_cpu_forecast_lstm(cfg: "IntelligenceConfig") -> BaseTask:
         data_loader=build_loader_for_task(
             cfg,
             "cpu_forecast_lstm",
+            value_col="cpu",
             prepare=make_lstm_prepare(look_back=look_back, num_variables=1, batch_size=16),
         ),
         bento_name="metrics_utilization_model_lstm",  # legacy compat

@@ -50,6 +50,17 @@ dev = [
 # optional [drift] extra.
 override-dependencies = ["kaleido>=1.0"]
 
+# Pull torch from the CPU-only PyTorch index. Without this, the default
+# resolution drags in the NVIDIA CUDA stack (nvidia-cublas, cudnn, triton,
+# numba, …) — useless on a CPU-only image and ~2.5 GB of bloat.
+[[tool.uv.index]]
+name = "pytorch-cpu"
+url = "https://download.pytorch.org/whl/cpu"
+explicit = true
+
+[tool.uv.sources]
+torch = { index = "pytorch-cpu" }
+
 [tool.hatch.build.targets.wheel]
 packages = ["src/intelligence"]
 
