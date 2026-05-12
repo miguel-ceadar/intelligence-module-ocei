@@ -1,7 +1,8 @@
 .PHONY: install install-dev install-legacy lint format test test-fast test-integration clean \
-        up down down-clean logs smoke e2e
+        up down logs smoke up-demo down-demo logs-demo e2e
 
 COMPOSE := docker compose
+COMPOSE_DEMO := docker compose -f docker-compose.yml -f docker-compose.demo.yml
 
 install:
 	pip install -e .
@@ -35,9 +36,9 @@ clean:
 	find . -type d -name .ruff_cache -exec rm -rf {} +
 	rm -rf build dist *.egg-info .coverage htmlcov
 
-# --- Docker compose stack -----------------------------------------------------
-# `up` builds + waits for healthchecks; `down` keeps the bento volume so
-# trained models persist across restarts; `down-clean` drops it.
+# --- Docker compose -----------------------------------------------------------
+# Standalone deployment — `up` runs just the intelligence service, expecting
+# you to point it at your own Prometheus (see `.env.example`).
 
 up:
 	$(COMPOSE) up -d --build --wait
@@ -45,16 +46,26 @@ up:
 down:
 	$(COMPOSE) down
 
-down-clean:
-	$(COMPOSE) down -v
-
 logs:
 	$(COMPOSE) logs -f intelligence
 
-# `smoke` assumes the stack is already up (iterate without rebuilding).
-# `e2e` is the one-shot: up + smoke, dump logs on failure.
-smoke:
-	pytest -m smoke -v
+# Demo overlay — adds an in-stack Prometheus + node-exporter so the service
+# has something to train against without touching your real infra. Used by
+# the smoke suite.
 
-e2e: up
-	pytest -m smoke -v || ($(COMPOSE) logs intelligence; exit 1)
+up-demo:
+	$(COMPOSE_DEMO) up -d --build --wait
+
+down-demo:
+	$(COMPOSE_DEMO) down -v
+
+logs-demo:
+	$(COMPOSE_DEMO) logs -f intelligence
+
+# `smoke` assumes a stack is already up — iterate without rebuilding.
+# `e2e` is the one-shot: demo overlay + smoke, dump logs on failure.
+smoke:
+	uv run pytest -m smoke -v
+
+e2e: up-demo
+	uv run pytest -m smoke -v || ($(COMPOSE_DEMO) logs intelligence; exit 1)

@@ -1,7 +1,19 @@
-# Intelligence Utility — config for the local compose stack.
-# Enables all four tasks and points them at the in-stack Prometheus.
-# The query aggregates CPU rate across all cores into a single fractional
-# series, which matches each task's InputSpec value_range = [0.0, 1.0].
+# Default standalone config for the intelligence service.
+#
+# The service queries an external Prometheus you operate. Either edit
+# `endpoint:` below, or leave it as-is and override at deploy time with
+# the env var:
+#
+#   INTELLIGENCE_TELEMETRY__PROMETHEUS__ENDPOINT=https://prom.example.com
+#
+# Env vars win over the YAML (pydantic-settings, double-underscore
+# delimits nested sections). Set them in your shell or in a `.env`
+# alongside docker-compose.yml — see `.env.example` for the full set.
+#
+# The PromQL queries below assume the target Prometheus scrapes
+# node-exporter; replace them with whatever metrics your deployment
+# exposes for CPU utilisation. Each task maps to one query that has to
+# return a single time series (one value per timestamp).
 
 intelligence:
   enabled_tasks:
@@ -12,7 +24,9 @@ intelligence:
   telemetry:
     source: prometheus
     prometheus:
-      endpoint: http://prometheus:9090
+      endpoint: http://prometheus.example.com:9090   # override via env or edit
+      # token_env: PROM_TOKEN                       # uncomment for bearer auth
+      # tls_skip_verify: false
       queries:
         cpu_forecast_arima: 'avg(rate(node_cpu_seconds_total{mode!="idle"}[30s]))'
         cpu_forecast_xgb: 'avg(rate(node_cpu_seconds_total{mode!="idle"}[30s]))'

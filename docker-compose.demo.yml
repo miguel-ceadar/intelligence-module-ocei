@@ -1,0 +1,41 @@
+# Demo / smoke overlay. Adds Prometheus + node-exporter and swaps the
+# intelligence config to point at the in-stack Prometheus.
+# Usage:
+#   docker compose -f docker-compose.yml -f docker-compose.demo.yml up -d --wait
+# or `make up-demo` / `make e2e`.
+
+services:
+  intelligence:
+    # Override the standalone config with the demo one (in-stack prom endpoint).
+    volumes:
+      - ./compose/intelligence.demo.yaml:/etc/intelligence/config.yaml:ro
+      - intelligence-bentoml:/var/lib/bentoml
+    depends_on:
+      prometheus:
+        condition: service_healthy
+
+  prometheus:
+    image: prom/prometheus:v2.54.1
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+      - --storage.tsdb.retention.time=1h
+      - --web.listen-address=:9090
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./compose/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+    depends_on:
+      - node-exporter
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:9090/-/healthy"]
+      interval: 2s
+      timeout: 1s
+      retries: 30
+
+  node-exporter:
+    image: prom/node-exporter:v1.8.2
+    command:
+      - --web.listen-address=:9100
+    expose:
+      - "9100"

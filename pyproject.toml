@@ -22,9 +22,7 @@ dependencies = [
   "statsmodels>=0.14.0",
   "xgboost==1.7.6",  # 2.x segfaults on macOS arm64 during numpy interop; pin stays until upstream fixes it
   "torch>=2.5.1",
-  "shap>=0.46.0",
   "nannyml>=0.13.0",
-  "mlflow>=2.22.0",
   "huggingface_hub>=0.20",
   "pydantic>=2.11.0",
   "pydantic-settings>=2.0",
@@ -36,6 +34,21 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+# Install with `uv sync --extra <name>`. Pilots opt in to the heavy bits
+# they actually use — none of these are required by the four shipped
+# tasks. The base install + Docker image stay lean.
+mlflow = [
+  # Tracking server client. service.py imports defensively
+  # (try/except ImportError); mlflow_gc shells out and tolerates
+  # the CLI being absent. Add this extra if mlflow.tracking_uri is set.
+  "mlflow>=2.22.0",
+]
+explain = [
+  # SHAP explanations. Reserved for re-introducing the explainability
+  # paths from the original ICOS / OASIS codebase. Not yet wired into
+  # any API endpoint.
+  "shap>=0.46.0",
+]
 dev = [
   "pytest>=8.0",
   "pytest-cov>=5.0",

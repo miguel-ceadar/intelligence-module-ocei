@@ -1,23 +1,28 @@
-# ICOS Intelligence Coordination API — O-CEI Utility
+# ICOS Intelligence Module
 
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://www.apache.org/licenses/LICENSE-2.0)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue.svg)](https://www.python.org/)
 [![DOI](https://img.shields.io/badge/DOI-10.1145%2F3721889.3721929-blue.svg)](https://doi.org/10.1145/3721889.3721929)
 
-> **CeADAR's adaptation of the [ICOS intelligence-module](https://github.com/icos-project/intelligence-module)
-> for more general setups** Same AI capabilities (forecasting, drift,
-> SHAP) — relaxed coupling so the service runs against generic
-> Prometheus-scraped telemetry on a vanilla k8s cluster, alongside (or
-> instead of) the original ICOS metaOS deployment.
+> Train forecasting and drift-detection models against your existing
+> Prometheus metrics, served as a small HTTP API. Plugs into the
+> monitoring you already run — no glue code, no separate training infra.
 
-A small AI coordination service for the edge-cloud continuum: train and
-serve models against telemetry, exposed as a single HTTP API. Tasks
-compose a *data loader* and a *model* — adding a new (domain × algorithm)
-pairing is one factory line.
+Point the service at your Prometheus, list the PromQL queries for the
+metrics you care about, and you get `/train` + `/predict` endpoints per
+metric. ARIMA, XGBoost, LSTM, and NannyML drift detection ship out of
+the box; adding a new `(metric × algorithm)` pairing is one factory line
+in `src/intelligence/tasks/catalog.py`.
 
-## What ships
+Originally developed by **CeADAR Ireland** for the
+[ICOS metaOS project](https://github.com/icos-project/intelligence-module).
+This iteration relaxes the ICOS-specific coupling so the same service
+runs on any vanilla Kubernetes + Prometheus stack, beside or instead of
+the original ICOS deployment.
 
-Four registered tasks (opt in via config):
+## What's included
+
+Four built-in tasks (opt in via config):
 
 | Task | Model | Use |
 |---|---|---|
@@ -26,77 +31,68 @@ Four registered tasks (opt in via config):
 | `cpu_forecast_lstm` | PyTorch LSTM | 1-step CPU forecast from a 6-observation window |
 | `cpu_forecast_arima_drift` | NannyML | Univariate drift detection paired with the ARIMA forecaster |
 
-Two data sources, picked once per deployment in config:
+Two data sources, picked once per deployment:
 
-- **`static`** — CSVs from the bundled `samples/` directory (dev / demo / tests).
-- **`prometheus`** — PromQL `/api/v1/query_range` against Prometheus or Thanos.
+- **`prometheus`** — PromQL `/api/v1/query_range` against your Prometheus or Thanos.
+- **`static`** — CSVs from the bundled `samples/` directory; used for demos and tests.
 
 ## Quick start
 
-### With Docker (recommended for a first look)
-
-Boots the service plus a local Prometheus + node-exporter so the
-`prometheus` data source works out of the box:
+### See it work (no setup)
 
 ```bash
+make e2e
+```
+
+Brings up the service alongside a sample Prometheus + node-exporter in
+Docker (~3 min the first time, image build included) and exercises
+train + predict on all four tasks. Use this to feel out the API before
+wiring it to your own infra. `make down-demo` tears it down.
+
+### Deploy against your Prometheus
+
+```bash
+cp .env.example .env
+# edit .env — set INTELLIGENCE_TELEMETRY__PROMETHEUS__ENDPOINT, plus
+# TOKEN_ENV + the token if your Prometheus needs auth.
 docker compose up -d --build --wait
 curl http://localhost:3000/healthz
 ```
 
-End-to-end exercise of all four tasks against the live stack
-(Prometheus needs ~2 minutes of warmup before the suite trains):
+`compose/intelligence.yaml` carries the task set and the PromQL queries.
+Edit `endpoint:` there for a permanent setting, or leave the placeholder
+and override via the env var — env wins.
 
-```bash
-make e2e        # = make up && pytest -m smoke
-```
-
-`make down` keeps the bento volume so trained models persist across
-restarts; `make down-clean` drops it.
-
-### With uv (local dev, no Docker)
+### Local dev (no Docker)
 
 ```bash
 uv sync
 uv run uvicorn intelligence.api.service:app --port 3000
-# or, for the full BentoML serving stack:
-uv run bentoml serve intelligence.api.service:svc
 ```
 
-Train against the bundled sample:
+### Calling the API
+
+Train + predict on the bundled CSV sample — works without a Prometheus:
 
 ```bash
 curl -X POST http://localhost:3000/tasks/cpu_forecast_arima/train \
   -H 'Content-Type: application/json' \
   -d '{"data_source": {"kind": "static", "name": "cpu_sample_dataset_orangepi.csv"}}'
-```
 
-Predict:
-
-```bash
 curl -X POST http://localhost:3000/tasks/cpu_forecast_arima/predict \
   -H 'Content-Type: application/json' \
   -d '{"input_series": {"cpu": [0.85]}}'
 ```
 
-`cpu_forecast_xgb` and `cpu_forecast_lstm` need a 6-value window:
+Same call, training from a Prometheus window instead:
 
 ```bash
-curl -X POST http://localhost:3000/tasks/cpu_forecast_xgb/predict \
-  -H 'Content-Type: application/json' \
-  -d '{"input_series": {"cpu": [0.30, 0.31, 0.29, 0.32, 0.30, 0.31]}}'
+... -d '{"data_source": {"kind": "prometheus", "window": "24h", "step": "1m"}}'
 ```
 
-Drift detection (12-value chunk):
-
-```bash
-curl -X POST http://localhost:3000/tasks/cpu_forecast_arima_drift/train \
-  -H 'Content-Type: application/json' \
-  -d '{"data_source": {"kind": "static", "name": "cpu_sample_dataset_orangepi.csv"}}'
-
-curl -X POST http://localhost:3000/tasks/cpu_forecast_arima_drift/predict \
-  -H 'Content-Type: application/json' \
-  -d '{"input_series": {"cpu": [0.30,0.31,0.29,0.32,0.30,0.31,0.30,0.29,0.31,0.32,0.30,0.31]}}'
-```
+`cpu_forecast_xgb` and `cpu_forecast_lstm` expect a 6-value `input_series`
+window; `cpu_forecast_arima_drift` expects 12. Otherwise identical
+envelope.
 
 ## API
 
@@ -110,18 +106,17 @@ curl -X POST http://localhost:3000/tasks/cpu_forecast_arima_drift/predict \
 | `GET`  | `/models`               | list Bento models in the local store |
 | `POST` | `/models/sync`          | push to or pull from a Hugging Face repo (opt-in) |
 
-Each task carries an `InputSpec` (feature count, window length, value
-range, units). Bad requests get a `422` before anything reaches the
-model. Bentos saved by a task carry their `InputSpec` in
-`custom_objects`; pulled / pretrained Bentos that lack a matching spec
-are refused at predict time (override via `allow_unverified_models` per
-task — see [Pretrained Bentos](#pretrained-bentos)).
+Each task declares an input contract (feature count, window length,
+expected value range). Requests that don't match get `422` before the
+model is touched. Trained models carry the contract with them, and
+pretrained models pulled from elsewhere are checked against it too —
+see [Pretrained Bentos](#pretrained-bentos).
 
 ## Configuration
 
-YAML file at `INTELLIGENCE_CONFIG`. Env vars override individual fields
-via `INTELLIGENCE_<SECTION>__<FIELD>` (double-underscore separates
-nested sections).
+The service reads a YAML config from `INTELLIGENCE_CONFIG`. Any field
+can be overridden by an env var — `INTELLIGENCE_<SECTION>__<FIELD>`
+(double underscore separates nested sections, env wins over YAML).
 
 ### Minimal — static, bundled samples
 
@@ -304,38 +299,30 @@ architecture sketch in `modules.png`.
 ## Development
 
 ```bash
-make install-dev    # uv sync --extra dev
-make test           # pytest (excludes smoke)
-make lint           # ruff check + format
-make up / make down # docker compose lifecycle
-make smoke          # pytest -m smoke against the running stack
-make e2e            # one-shot: up + smoke, dumps logs on failure
+make install-dev               # uv sync --extra dev
+make test                      # pytest (excludes smoke)
+make lint                      # ruff check + format
+make up / make down            # standalone compose (intelligence only)
+make up-demo / make down-demo  # demo overlay (adds in-stack prom + node-exporter)
+make smoke                     # pytest -m smoke against whichever stack is running
+make e2e                       # one-shot: demo overlay + smoke, dumps logs on failure
 ```
-
-Tests: 126 passing, 2 skipped. Integration tests spin up the service
-in-process via `httpx`'s ASGI client — no subprocess boot needed.
-Smoke tests run against a live compose stack (see Quick start).
 
 macOS arm64 quick notes:
 - `brew install libomp` once — xgboost dlopens its native lib.
 
-## Provenance
+## Credits & funding
 
-Built on the [ICOS intelligence-module](https://github.com/icos-project/intelligence-module),
-part of the [ICOS metaOS](https://www.icos-project.eu/) initiative. The
-original work was funded by the EU HORIZON programme under grant
-agreement No. 101070177.
+Originally built at **CeADAR Ireland** (University College Dublin) as
+part of the [ICOS metaOS](https://www.icos-project.eu/) initiative.
 
-### Credits
-
-- **CeADAR Ireland** (University College Dublin): Jaydeep Samanta,
-  Sebastian Cajas Ordoñez, Romila Ghosh, Dr. Andrés L. Suárez-Cetrulo,
-  Dr. Ricardo Simón Carbajo.
+- **CeADAR Ireland, UCD**: Jaydeep Samanta, Sebastian Cajas Ordoñez,
+  Romila Ghosh, Dr. Andrés L. Suárez-Cetrulo, Dr. Ricardo Simón Carbajo.
 - **National and Kapodistrian University of Athens (NKUA)**: contributors
   to the original ICOS intelligence module.
 
-🇪🇺 This work has received funding from the European Union's HORIZON
-research and innovation programme under grant agreement No. 101070177.
+🇪🇺 Funded by the European Union's HORIZON research and innovation
+programme under grant agreement No. 101070177.
 
 ## License
 

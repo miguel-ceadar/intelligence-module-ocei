@@ -1553,7 +1553,6 @@ dependencies = [
     { name = "fastapi" },
     { name = "huggingface-hub" },
     { name = "matplotlib" },
-    { name = "mlflow" },
     { name = "nannyml" },
     { name = "numpy" },
     { name = "pandas" },
@@ -1565,7 +1564,6 @@ dependencies = [
     { name = "scikit-learn", version = "1.8.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
     { name = "scipy", version = "1.15.3", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
     { name = "scipy", version = "1.17.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
-    { name = "shap" },
     { name = "statsmodels" },
     { name = "torch", version = "2.11.0", source = { registry = "https://download.pytorch.org/whl/cpu" }, marker = "(python_full_version < '3.12' and sys_platform == 'darwin') or (platform_machine != 'x86_64' and sys_platform == 'darwin')" },
     { name = "torch", version = "2.11.0+cpu", source = { registry = "https://download.pytorch.org/whl/cpu" }, marker = "(python_full_version >= '3.12' and platform_machine == 'x86_64') or sys_platform != 'darwin'" },
@@ -1581,6 +1579,12 @@ dev = [
     { name = "pytest-cov" },
     { name = "ruff" },
 ]
+explain = [
+    { name = "shap" },
+]
+mlflow = [
+    { name = "mlflow" },
+]
 
 [package.metadata]
 requires-dist = [
@@ -1589,7 +1593,7 @@ requires-dist = [
     { name = "httpx", marker = "extra == 'dev'" },
     { name = "huggingface-hub", specifier = ">=0.20" },
     { name = "matplotlib", specifier = ">=3.7.1" },
-    { name = "mlflow", specifier = ">=2.22.0" },
+    { name = "mlflow", marker = "extra == 'mlflow'", specifier = ">=2.22.0" },
     { name = "nannyml", specifier = ">=0.13.0" },
     { name = "numpy", specifier = ">=1.24.4,<2" },
     { name = "pandas", specifier = ">=1.5.3" },
@@ -1603,13 +1607,13 @@ requires-dist = [
     { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.6" },
     { name = "scikit-learn", specifier = ">=1.6.1" },
     { name = "scipy", specifier = ">=1.10.1" },
-    { name = "shap", specifier = ">=0.46.0" },
+    { name = "shap", marker = "extra == 'explain'", specifier = ">=0.46.0" },
     { name = "statsmodels", specifier = ">=0.14.0" },
     { name = "torch", specifier = ">=2.5.1", index = "https://download.pytorch.org/whl/cpu" },
     { name = "tqdm", specifier = ">=4.65.0" },
     { name = "xgboost", specifier = "==1.7.6" },
 ]
-provides-extras = ["dev"]
+provides-extras = ["mlflow", "explain", "dev"]
 
 [[package]]
 name = "itsdangerous"

@@ -1,0 +1,19 @@
+# Demo config — used by `docker-compose.demo.yml` to point the service
+# at the in-stack Prometheus that the overlay spins up. Not for real
+# deployments; see `compose/intelligence.yaml` for the standalone template.
+
+intelligence:
+  enabled_tasks:
+    - cpu_forecast_arima
+    - cpu_forecast_xgb
+    - cpu_forecast_lstm
+    - cpu_forecast_arima_drift
+  telemetry:
+    source: prometheus
+    prometheus:
+      endpoint: http://prometheus:9090
+      queries:
+        cpu_forecast_arima: 'avg(rate(node_cpu_seconds_total{mode!="idle"}[30s]))'
+        cpu_forecast_xgb: 'avg(rate(node_cpu_seconds_total{mode!="idle"}[30s]))'
+        cpu_forecast_lstm: 'avg(rate(node_cpu_seconds_total{mode!="idle"}[30s]))'
+        cpu_forecast_arima_drift: 'avg(rate(node_cpu_seconds_total{mode!="idle"}[30s]))'

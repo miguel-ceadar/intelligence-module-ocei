@@ -55,6 +55,7 @@ class StaticCsvLoader:
         base_dir: Path | None = None,
     ) -> None:
         self.source = source if source is not None else StaticSource(base_dir=base_dir)
+        self.value_col = value_col
         self.prepare = prepare if prepare is not None else _make_univariate_prepare(value_col)
 
     def __call__(self, descriptor: StaticDataSource) -> dict:
@@ -63,6 +64,16 @@ class StaticCsvLoader:
                 f"StaticCsvLoader expects StaticDataSource, got {type(descriptor).__name__}"
             )
         df = self.source.fetch_range(descriptor.name)
+        # Mirror PrometheusLoader: when the dataset is univariate and a
+        # canonical name is set, rename to it so downstream consumers
+        # (default prepare, drift's stored column_names) match the task's
+        # InputSpec feature name regardless of which header the source had.
+        if self.value_col is not None:
+            value_cols = [
+                c for c in df.columns if c.lower() not in {"time", "timestamp", "date"}
+            ]
+            if len(value_cols) == 1 and value_cols[0] != self.value_col:
+                df = df.rename(columns={value_cols[0]: self.value_col})
         return self.prepare(df)
 
     def is_ready(self) -> tuple[bool, str]:
