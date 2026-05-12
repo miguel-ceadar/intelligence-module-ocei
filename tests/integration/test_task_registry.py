@@ -67,13 +67,19 @@ def test_task_registry_register_idempotent_or_explicit():
     assert list(reg).count("cpu_forecast_arima") == 1
 
 
-def test_task_registry_filtered_by_enabled_set():
-    """Tasks not in the configured ``enabled_tasks`` list should not register."""
+def test_task_registry_built_from_task_blocks():
+    """Every entry under ``cfg.tasks`` becomes a registered task; entries
+    not declared in the config aren't registered."""
     build = getattr(tasks, "build_registry_from_config", None)
     if build is None:
         pytest.skip("intelligence.tasks.build_registry_from_config not implemented yet")
-    from intelligence.config.settings import IntelligenceConfig
+    from intelligence.config.settings import ArimaTaskConfig, IntelligenceConfig
 
-    reg = build(IntelligenceConfig(enabled_tasks=["cpu_forecast_arima"]))
+    cfg = IntelligenceConfig(
+        tasks={
+            "cpu_forecast_arima": ArimaTaskConfig(kind="arima", feature="cpu"),
+        },
+    )
+    reg = build(cfg)
     assert "cpu_forecast_arima" in list(reg)
-    assert "anomaly_nkua_clf_cell0" not in list(reg)
+    assert "mem_forecast_arima" not in list(reg)

@@ -65,7 +65,15 @@ class DriftDetectionTask(BaseTask):
             or [c for c in reference_df.columns if c.lower() not in {"time", "timestamp", "date"}]
         )
 
-        import nannyml as nml
+        try:
+            import nannyml as nml
+        except ImportError as e:
+            raise ImportError(
+                "drift task requires the `nannyml` package. Install it with "
+                "`uv sync --extra drift` (or `pip install intelligence[drift]`) "
+                "and rebuild the image."
+            ) from e
+
         calc = nml.UnivariateDriftCalculator(
             column_names=column_names,
             chunk_size=self.chunk_size,
@@ -98,11 +106,12 @@ class DriftDetectionTask(BaseTask):
         if self.input_spec is not None:
             self.input_spec.validate(req.input_series)
 
-        bento = self._load_bento()
+        bento = self._load_bento(version=req.model_version)
         if bento is None:
+            resolved = self._resolve_version(req.model_version)
             raise FileNotFoundError(
-                f"no fitted drift calculator for {self.name}; "
-                f"POST /tasks/{self.name}/train first"
+                f"no Bento {self.bento_name}:{resolved} in the local store; "
+                f"POST /tasks/{self.name}/train first, or pin to an existing version"
             )
         self._verify_bento(bento)
 
@@ -128,12 +137,16 @@ class DriftDetectionTask(BaseTask):
         ]
         any_alert = bool(chunks[alert_cols].any().any()) if alert_cols else False
 
-        return PredictResponse(prediction={
-            "drift_detected": any_alert,
-            "n_chunks": int(len(chunks)),
-            "metric": metric,
-            "forecaster": self.forecaster_task_name,
-        })
+        served = str(getattr(bento, "tag", "")).split(":")[-1] or None
+        return PredictResponse(
+            prediction={
+                "drift_detected": any_alert,
+                "n_chunks": int(len(chunks)),
+                "metric": metric,
+                "forecaster": self.forecaster_task_name,
+            },
+            model_version=served,
+        )
 
 
 def make_drift_prepare(value_col: str | None = None) -> Callable[[pd.DataFrame], dict]:

@@ -37,6 +37,18 @@ class Model(Protocol):
         """
         ...
 
-    def predict(self, bento_model: Any, input_series: dict[str, list[float]]) -> Any:
-        """Predict from a saved Bento + new observations."""
+    def predict(
+        self,
+        bento_model: Any,
+        input_series: dict[str, list[float]],
+        horizon: int = 1,
+    ) -> Any:
+        """Predict from a saved Bento + new observations.
+
+        ``horizon`` is the number of steps ahead to forecast. Forecasting
+        models return ``list[ForecastPoint]`` of length ``horizon``;
+        ``ForecastPoint.lower`` / ``upper`` carry the 95 % CI when the
+        model exposes one (ARIMA does; recursive XGB and direct LSTM
+        leave them ``None``).
+        """
         ...

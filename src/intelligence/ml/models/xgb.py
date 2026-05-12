@@ -23,6 +23,8 @@ import numpy as np
 import pandas as pd
 from sklearn.preprocessing import StandardScaler
 
+from intelligence.api.schemas import ForecastPoint
+
 logger = logging.getLogger(__name__)
 
 
@@ -75,7 +77,17 @@ class XgbModel:
         )
         return bento, _coerce_jsonable(metrics)
 
-    def predict(self, bento_model: Any, input_series: dict[str, list[float]]) -> Any:
+    def predict(
+        self,
+        bento_model: Any,
+        input_series: dict[str, list[float]],
+        horizon: int = 1,
+    ) -> list[ForecastPoint]:
+        """Recursive multi-horizon: predict t+1, slide it into the window,
+        predict t+2, …, ``horizon`` times. No native confidence intervals
+        — ``lower``/``upper`` stay ``None`` on every ``ForecastPoint``.
+        Quantile XGB / bootstrap CIs are deferred (memory: roadmap-waves).
+        """
         if not input_series:
             raise ValueError("input_series is empty")
         # Univariate — pick the first series.
@@ -88,23 +100,26 @@ class XgbModel:
 
         scaler_x = bento_model.custom_objects["scaler_X"]
         scaler_y = bento_model.custom_objects["scaler_obj"]
-
-        # Build a (1, look_back) feature vector from the most recent window.
-        window = np.array(values[-look_back:], dtype=float).reshape(1, look_back)
-        # scaler_X was fit on a DataFrame with named columns
-        # ("var1(t-N)", ..., "var1(t-1)"). Use the same names so the scaler
-        # accepts the input.
         cols = getattr(scaler_x, "feature_names_in_", None)
-        if cols is not None:
-            window_df = pd.DataFrame(window, columns=cols)
-            x_scaled = scaler_x.transform(window_df)
-        else:
-            x_scaled = scaler_x.transform(window)
+        regressor = bento_model.load_model()
 
-        regressor = bento_model.load_model()  # actual XGBRegressor
-        y_scaled = regressor.predict(x_scaled)
-        y = scaler_y.inverse_transform(np.asarray(y_scaled).reshape(-1, 1))
-        return round(float(y[0, 0]), 4)
+        window = [float(v) for v in values[-look_back:]]
+        forecasts: list[float] = []
+        for _ in range(horizon):
+            x = np.array(window, dtype=float).reshape(1, look_back)
+            if cols is not None:
+                x_scaled = scaler_x.transform(pd.DataFrame(x, columns=cols))
+            else:
+                x_scaled = scaler_x.transform(x)
+            y_scaled = regressor.predict(x_scaled)
+            y_raw = float(scaler_y.inverse_transform(
+                np.asarray(y_scaled).reshape(-1, 1)
+            )[0, 0])
+            forecasts.append(y_raw)
+            # Slide the window forward: drop oldest, append fresh prediction.
+            window = [*window[1:], y_raw]
+
+        return [ForecastPoint(value=round(v, 4)) for v in forecasts]
 
 
 def make_xgb_prepare(

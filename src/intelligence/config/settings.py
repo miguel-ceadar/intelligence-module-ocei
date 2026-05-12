@@ -1,33 +1,25 @@
-"""Typed config layer (phase-1 minimum).
+"""Typed config layer.
 
 Loads from a YAML file (path via ``INTELLIGENCE_CONFIG`` env var or
 explicit ``load_config(path)``). Env vars override file values via
 ``INTELLIGENCE_<SECTION>__<FIELD>`` (double underscore separates
 nested sections).
 
-Validates ``enabled_tasks`` against the registered builtin catalog at
-load time so misconfigured deployments fail loudly at startup, not at
-first request.
-
-Phase-2 will add real fields under ``telemetry`` (Prometheus endpoint,
-auth, query templates) and ``bootstrap`` (auto-train-on-startup per
-task). The keys are reserved here so the phase-2 additions are
-additive and don't break existing config files.
+Tasks are declared as a dict keyed by name; each value is a
+discriminated-union ``TaskInstanceConfig`` (chosen by ``kind``).
+Cross-task references (e.g. a drift task's ``forecaster:`` pointing at
+another task's name) are validated at load time so misconfigured
+deployments fail loudly at startup, not at first request.
 """
 
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Literal
+from typing import Annotated, Literal
 
 import yaml
 from pydantic import BaseModel, Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
-
-
-class MlflowConfig(BaseModel):
-    tracking_uri: str = "http://localhost:5000"
-    auto_gc: bool = False
 
 
 class ModelRepoConfig(BaseModel):
@@ -42,12 +34,29 @@ class ModelRepoConfig(BaseModel):
     repo_id: str | None = None
 
 
-class PrometheusConfig(BaseModel):
-    """Connection + auth + per-task PromQL queries.
+class AuthConfig(BaseModel):
+    """Optional bearer-token auth on the HTTP API.
 
-    The query for each task lives here (not in the request body) — the
-    operator wires the data source once, callers just say
-    ``kind: "prometheus"`` with a window/step.
+    Set ``token_env`` to the name of an env var holding the expected
+    token; every protected request must then carry
+    ``Authorization: Bearer <token>`` matching that env var's value.
+    Probes (``/healthz``, ``/readyz``, ``/metrics``) and the auto-
+    generated docs (``/docs``, ``/redoc``, ``/openapi.json``) stay
+    open regardless — k8s probes and API discovery don't need a
+    credential.
+
+    Default off — local dev and the smoke stack stay frictionless.
+    """
+
+    token_env: str | None = None
+
+
+class PrometheusConfig(BaseModel):
+    """Connection + auth for the deployment-wide Prometheus.
+
+    Per-task PromQL lives on each task config block (``query:``); this
+    config carries only what's shared across tasks — endpoint, auth,
+    TLS, timeout.
 
     Auth: ``token_env`` reads a bearer token from an environment variable
     at call time; ``token_file`` reads it from a file path. Pick one,
@@ -59,7 +68,6 @@ class PrometheusConfig(BaseModel):
     token_file: str | None = None
     tls_skip_verify: bool = False
     timeout: float = 30.0
-    queries: dict[str, str] = Field(default_factory=dict)
 
     @model_validator(mode="after")
     def _one_auth_method(self) -> "PrometheusConfig":
@@ -107,21 +115,138 @@ class BootstrapConfig(BaseModel):
     step: str | None = None            # prometheus mode
 
 
-class TaskConfig(BaseModel):
-    """Per-task config — currently just the bootstrap block. Reserved as
-    the home for future per-task knobs (e.g. ``allow_unverified_models``).
+# --- Per-kind task instance configs ----------------------------------------
+#
+# Each entry under ``intelligence.tasks`` is a discriminated-union config
+# block keyed by ``kind``. The kind picks the algorithm (and a per-task
+# instance config schema); the surrounding fields declare what to train on
+# and how to validate request inputs.
+
+
+class ArimaModelParams(BaseModel):
+    """ARIMA order. Defaults match ``ArimaModel.__init__``."""
+
+    p: int = 5
+    d: int = 1
+    q: int = 0
+
+
+class XgbModelParams(BaseModel):
+    """XGBoost regressor params. Extra fields tolerated for forward-compat
+    with newer xgboost versions; the model passes them through.
     """
 
+    model_config = SettingsConfigDict(extra="allow")
+    n_estimators: int = 100
+    max_depth: int = 3
+    eta: float = 0.1
+
+
+class LstmModelParams(BaseModel):
+    """LSTM network shape. ``num_epochs`` deliberately small by default so
+    the demo trains fast; real deployments override.
+    """
+
+    input_size: int = 1
+    output_size: int = 1
+    hidden_size: int = 4
+    num_epochs: int = 3
+
+
+class _BaseTaskConfig(BaseModel):
+    """Fields shared by every kind.
+
+    ``feature`` is both the InputSpec ``feature_names[0]`` and the key
+    clients use in ``input_series`` at predict time. The loader renames
+    the source column to this name (see ``PrometheusLoader`` /
+    ``StaticCsvLoader``), so feature naming is consistent regardless of
+    what the upstream telemetry source labels its value column.
+
+    ``query`` is the PromQL string used when ``telemetry.source ==
+    "prometheus"``. In static mode the train request body supplies the
+    CSV filename; ``query`` is unused and may be left ``None``.
+
+    ``pinned_version`` locks predict requests to a specific Bento
+    version (e.g. for rollback or staged rollouts). ``None`` means the
+    task uses ``:latest`` unless a request overrides via
+    ``PredictRequest.model_version``.
+    """
+
+    feature: str
+    value_range: tuple[float, float] | None = None
+    query: str | None = None
+    pinned_version: str | None = None
     bootstrap: BootstrapConfig = BootstrapConfig()
+
+
+class ArimaTaskConfig(_BaseTaskConfig):
+    """``kind: arima`` — single-observation lookback, statsmodels ARIMA."""
+
+    kind: Literal["arima"]
+    steps_back: int = 1
+    model_params: ArimaModelParams = ArimaModelParams()
+
+
+class XgbTaskConfig(_BaseTaskConfig):
+    """``kind: xgb`` — sliding-window XGBoost regressor."""
+
+    kind: Literal["xgb"]
+    steps_back: int = 6
+    model_params: XgbModelParams = XgbModelParams()
+
+
+class LstmTaskConfig(_BaseTaskConfig):
+    """``kind: lstm`` — PyTorch LSTM. ``batch_size`` flows into the
+    LSTM-specific prepare; ``steps_back`` is the input window length.
+
+    LSTM is direct multi-output: ``horizon`` becomes both the trained
+    network's ``output_size`` and the ``InputSpec.max_horizon`` clamp.
+    Predict requests with horizon above this are refused at the API
+    boundary — retrain with a larger ``horizon:`` to extend the forecast
+    window.
+    """
+
+    kind: Literal["lstm"]
+    steps_back: int = 6
+    batch_size: int = 16
+    horizon: int = 1
+    model_params: LstmModelParams = LstmModelParams()
+
+
+class DriftTaskConfig(_BaseTaskConfig):
+    """``kind: drift`` — NannyML univariate drift detection.
+
+    ``forecaster`` references another task's name; it carries the
+    semantic link to the forecaster this drift detector pairs with.
+    No per-algorithm model — the calculator itself is the artifact.
+    """
+
+    kind: Literal["drift"]
+    forecaster: str
+    chunk_size: int = 12
+    metric: str = "jensen_shannon"
+
+
+# Discriminated union — pydantic dispatches on ``kind`` and produces a
+# clear validation error when an unknown kind appears.
+TaskInstanceConfig = Annotated[
+    ArimaTaskConfig | XgbTaskConfig | LstmTaskConfig | DriftTaskConfig,
+    Field(discriminator="kind"),
+]
 
 
 class IntelligenceConfig(BaseSettings):
     """The ``intelligence:`` section of the config file.
 
-    Env-var overrides: ``INTELLIGENCE_MLFLOW__TRACKING_URI=...`` overrides
-    ``intelligence.mlflow.tracking_uri``. Env wins over init args (so a
-    file-loaded value can be overridden from the environment without
-    editing the file).
+    Tasks are declared as a dict keyed by task name; each value is a
+    discriminated-union ``TaskInstanceConfig`` (picked by ``kind``).
+    Every entry under ``tasks:`` is registered at startup — there's no
+    separate enabled list. To disable a task, comment its block.
+
+    Env-var overrides: ``INTELLIGENCE_TELEMETRY__PROMETHEUS__ENDPOINT=...``
+    overrides ``intelligence.telemetry.prometheus.endpoint``. Env wins
+    over init args (so a file-loaded value can be overridden from the
+    environment without editing the file).
     """
 
     model_config = SettingsConfigDict(
@@ -131,11 +256,10 @@ class IntelligenceConfig(BaseSettings):
         extra="ignore",
     )
 
-    enabled_tasks: list[str] = ["cpu_forecast_arima"]
-    mlflow: MlflowConfig = MlflowConfig()
     model_repo: ModelRepoConfig = ModelRepoConfig()
     telemetry: TelemetryConfig = TelemetryConfig()
-    tasks: dict[str, TaskConfig] = Field(default_factory=dict)
+    auth: AuthConfig = AuthConfig()
+    tasks: dict[str, TaskInstanceConfig] = Field(default_factory=dict)
 
     @classmethod
     def settings_customise_sources(
@@ -154,24 +278,24 @@ class AppConfig(BaseModel):
     intelligence: IntelligenceConfig = IntelligenceConfig()
 
     def validate_against_registry(self) -> None:
-        """Check that every name in ``enabled_tasks`` has a registered factory.
+        """Cross-reference checks that pydantic can't express on its own.
 
-        Importing ``intelligence.tasks.catalog`` populates the catalog;
-        we check membership against ``_BUILTIN_FACTORIES``.
+        Pydantic's discriminated union already rejects unknown ``kind``
+        values at parse time, so what's left here is the *reference*
+        from a drift task's ``forecaster:`` field to another task that
+        must exist in the same config.
         """
-        # Local imports — keeps this module importable without side effects
-        # for callers who only want to read the schema.
-        import intelligence.tasks.catalog  # noqa: F401  populates _BUILTIN_FACTORIES
-        from intelligence.tasks.base import _BUILTIN_FACTORIES
+        from intelligence.config.settings import DriftTaskConfig
 
-        unknown = [
-            t for t in self.intelligence.enabled_tasks if t not in _BUILTIN_FACTORIES
-        ]
-        if unknown:
-            raise ValueError(
-                f"unknown task(s) in enabled_tasks: {unknown}. "
-                f"Available builtin tasks: {sorted(_BUILTIN_FACTORIES)}"
-            )
+        task_names = set(self.intelligence.tasks)
+        for name, task_cfg in self.intelligence.tasks.items():
+            if isinstance(task_cfg, DriftTaskConfig):
+                if task_cfg.forecaster not in task_names:
+                    raise ValueError(
+                        f"drift task {name!r} references forecaster "
+                        f"{task_cfg.forecaster!r} which isn't defined under "
+                        f"`tasks:`. Define the forecaster task or fix the reference."
+                    )
 
 
 def load_config(path: Path | str | None = None, *, validate: bool = True) -> AppConfig:
@@ -179,9 +303,9 @@ def load_config(path: Path | str | None = None, *, validate: bool = True) -> App
 
     Args:
         path: YAML file. ``None`` returns defaults + env overrides only.
-        validate: if ``True`` (default), check ``enabled_tasks`` against
-            the registered task catalog. Set ``False`` for unit tests
-            that exercise the config schema in isolation.
+        validate: if ``True`` (default), run cross-reference checks
+            (e.g. drift tasks point at defined forecasters). Set
+            ``False`` for unit tests that exercise the schema in isolation.
     """
     if path is None:
         cfg = AppConfig()

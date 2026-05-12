@@ -1,8 +1,8 @@
 """Task abstraction — see ``base.Task`` (Protocol) and ``base.BaseTask`` (concrete).
 
-Concrete task instances are built by factories in ``catalog``. Importing
-this package does NOT trigger the catalog; that happens lazily when
-``build_registry_from_config`` is called.
+Task instances are built from typed config blocks by per-kind builders
+under ``intelligence.tasks.builders``. ``build_registry_from_config``
+walks ``cfg.tasks`` and dispatches each block to its builder.
 """
 
 from intelligence.tasks.base import (
@@ -10,8 +10,6 @@ from intelligence.tasks.base import (
     Task,
     TaskRegistry,
     build_registry_from_config,
-    builtin_task_factory,
-    register_builtin,
 )
 
 __all__ = [
@@ -19,6 +17,4 @@ __all__ = [
     "Task",
     "TaskRegistry",
     "build_registry_from_config",
-    "builtin_task_factory",
-    "register_builtin",
 ]

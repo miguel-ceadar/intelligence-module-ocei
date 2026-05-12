@@ -39,13 +39,40 @@ class TrainResponse(BaseModel):
     metrics: dict[str, Any]
 
 
+class ForecastPoint(BaseModel):
+    """One step of a forecast.
+
+    ``value`` is the point estimate. ``lower`` / ``upper`` bracket a
+    95 % confidence interval when the underlying model exposes one
+    (ARIMA does, recursive XGB does not, direct-output LSTM does not
+    by default). Both bounds present or both absent — never just one.
+    """
+
+    value: float
+    lower: float | None = None
+    upper: float | None = None
+
+
 class PredictRequest(BaseModel):
     input_series: dict[str, list[float]]
+    # Number of steps ahead to forecast. Tasks may bound this via
+    # ``InputSpec.max_horizon`` (e.g. an LSTM trained with output_size=N
+    # refuses horizon>N at the API boundary).
+    horizon: int = Field(1, ge=1, description="Forecast steps ahead (>= 1)")
+    # Optional model version pin for this request. Overrides any task-level
+    # `pinned_version`. ``None`` falls back to task pin → ``:latest``.
+    model_version: str | None = None
 
 
 class PredictResponse(BaseModel):
+    # ``Any`` rather than ``list[ForecastPoint]`` because drift tasks
+    # keep a dict-shaped prediction. Forecast tasks return
+    # ``list[ForecastPoint]`` of length ``request.horizon``.
     prediction: Any
     metric_type: int | None = None
+    # The concrete version that actually served this request — useful for
+    # logging, A/B analysis, and verifying a rollback took effect.
+    model_version: str | None = None
 
 
 class TaskInfo(BaseModel):

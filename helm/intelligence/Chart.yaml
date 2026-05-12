@@ -1,0 +1,19 @@
+apiVersion: v2
+name: intelligence
+description: |
+  Train and serve forecasting + drift-detection models against your existing
+  Prometheus metrics. A small HTTP API that plugs into the monitoring you
+  already run — no glue code, no separate training infra.
+type: application
+version: 0.1.0
+appVersion: "0.1.0"
+keywords:
+  - forecasting
+  - drift-detection
+  - prometheus
+  - mlops
+  - machine-learning
+sources:
+  - https://github.com/icos-project/intelligence-module
+maintainers:
+  - name: CeADAR Ireland

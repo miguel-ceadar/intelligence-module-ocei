@@ -19,15 +19,25 @@ pytestmark = pytest.mark.integration
 
 
 def _cfg_with_bootstrap(task_name: str, **boot_kwargs):
+    """Build a config that carries one task with a bootstrap block.
+
+    Uses ArimaTaskConfig as a stand-in — bootstrap is the same shape on
+    every kind, so the test only cares about the bootstrap field.
+    """
     from intelligence.config.settings import (
+        ArimaTaskConfig,
         BootstrapConfig,
         IntelligenceConfig,
-        TaskConfig,
     )
 
     return IntelligenceConfig(
-        enabled_tasks=[task_name],
-        tasks={task_name: TaskConfig(bootstrap=BootstrapConfig(**boot_kwargs))},
+        tasks={
+            task_name: ArimaTaskConfig(
+                kind="arima",
+                feature="cpu",
+                bootstrap=BootstrapConfig(**boot_kwargs),
+            ),
+        },
     )
 
 
@@ -38,9 +48,10 @@ def test_bootstrap_config_round_trips_from_yaml(tmp_path):
     p.write_text(
         """
         intelligence:
-          enabled_tasks: [cpu_forecast_arima]
           tasks:
             cpu_forecast_arima:
+              kind: arima
+              feature: cpu
               bootstrap:
                 auto_train_on_startup: true
                 dataset_name: cpu_sample_dataset_orangepi.csv
@@ -56,7 +67,7 @@ def test_bootstrap_disabled_by_default():
     """An empty `tasks` block (or missing entry) means no bootstrap."""
     from intelligence.config.settings import IntelligenceConfig
 
-    cfg = IntelligenceConfig(enabled_tasks=["cpu_forecast_arima"])
+    cfg = IntelligenceConfig()
     assert cfg.tasks == {}
 
 
@@ -78,26 +89,27 @@ def test_build_data_source_for_static(tmp_path):
 def test_build_data_source_for_prometheus():
     from intelligence.api.schemas import PrometheusDataSource
     from intelligence.config.settings import (
+        ArimaTaskConfig,
         BootstrapConfig,
         IntelligenceConfig,
         PrometheusConfig,
-        TaskConfig,
         TelemetryConfig,
     )
     from intelligence.tasks.bootstrap import build_bootstrap_data_source
 
     cfg = IntelligenceConfig(
-        enabled_tasks=["cpu_forecast_arima"],
         telemetry=TelemetryConfig(
             source="prometheus",
-            prometheus=PrometheusConfig(
-                endpoint="http://prom:9090",
-                queries={"cpu_forecast_arima": "up"},
-            ),
+            prometheus=PrometheusConfig(endpoint="http://prom:9090"),
         ),
         tasks={
-            "cpu_forecast_arima": TaskConfig(
-                bootstrap=BootstrapConfig(auto_train_on_startup=True, window="2h", step="1m"),
+            "cpu_forecast_arima": ArimaTaskConfig(
+                kind="arima",
+                feature="cpu",
+                query="up",
+                bootstrap=BootstrapConfig(
+                    auto_train_on_startup=True, window="2h", step="1m",
+                ),
             ),
         },
     )

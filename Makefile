@@ -69,3 +69,13 @@ smoke:
 
 e2e: up-demo
 	uv run pytest -m smoke -v || ($(COMPOSE_DEMO) logs intelligence; exit 1)
+
+# --- Helm chart ---------------------------------------------------------------
+
+chart-lint:
+	helm lint helm/intelligence
+
+chart-template:
+	helm template intelligence helm/intelligence
+
+.PHONY: chart-lint chart-template

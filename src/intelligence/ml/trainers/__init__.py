@@ -5,7 +5,6 @@ Each ``Model`` adapter in ``intelligence.ml.models`` is a thin wrapper
 that prepares components and calls one of these.
 """
 
-from intelligence.ml.trainers._mlflow import mlflow_gc
 from intelligence.ml.trainers.base import ModelTrainer, TimeSeriesDataset
 from intelligence.ml.trainers.lstm import LighterStudentLSTMModel, LSTMModel
 from intelligence.ml.trainers.metrics import (
@@ -22,7 +21,6 @@ __all__ = [
     "TimeSeriesDataset",
     "metrics",
     "metrics_pytorch",
-    "mlflow_gc",
     "print_size_of_model",
     "symmetric_mean_absolute_percentage_error",
 ]

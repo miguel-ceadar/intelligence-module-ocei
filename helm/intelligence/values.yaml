@@ -1,0 +1,127 @@
+# Default values for the intelligence chart.
+# Override on `helm install` / `helm upgrade` with --set or -f <values-file>.
+
+# -- Container image. Override `image.tag` to pin a specific build.
+image:
+  repository: intelligence-utility
+  tag: dev
+  pullPolicy: IfNotPresent
+
+imagePullSecrets: []
+
+# -- Pod replicas. The BentoML model store is per-pod by default; running
+# more than one replica needs either a ReadWriteMany volume (see
+# `persistence.accessMode`) or an external registry sync. See the chart
+# README for the three patterns.
+replicaCount: 1
+
+resources:
+  requests:
+    cpu: 200m
+    memory: 1Gi
+  limits:
+    cpu: 2000m
+    memory: 4Gi
+
+service:
+  type: ClusterIP
+  port: 3000
+
+# -- The intelligence YAML config that gets mounted into the pod via a
+# ConfigMap. Mirror the shape of `examples/*/config.yaml`. Sensitive
+# fields (tokens) should NOT live here — use `secretEnv` instead.
+config:
+  intelligence:
+    telemetry:
+      source: prometheus
+      prometheus:
+        endpoint: http://prometheus.monitoring.svc:9090
+        # token_env: PROM_TOKEN   # uncomment + populate via secretEnv
+    tasks:
+      cpu_forecast_arima:
+        kind: arima
+        feature: cpu
+        value_range: [0.0, 1.0]
+        steps_back: 1
+        query: 'avg(rate(node_cpu_seconds_total{mode!="idle"}[30s]))'
+
+# -- Plain (non-secret) env-var overrides, applied on top of the config
+# above via pydantic-settings' INTELLIGENCE_<SECTION>__<FIELD> pattern.
+extraEnv: {}
+  # INTELLIGENCE_TELEMETRY__PROMETHEUS__ENDPOINT: https://prom.example.com
+
+# -- Sensitive env vars. Reference an existing Secret in the cluster
+# (existingSecretName) or let the chart create one from secretEnv.
+# Keys become env var names in the pod.
+existingSecretName: ""
+secretEnv: {}
+  # PROM_TOKEN: ""          # referenced from config.intelligence.telemetry.prometheus.token_env
+  # HF_TOKEN: ""            # for /models/sync push/pull
+
+# -- BentoML model store. Persists trained models across pod restarts.
+# RWO works for single-replica; RWX is required for >1 replica with the
+# default "share the same store" pattern (see chart README).
+persistence:
+  enabled: true
+  storageClassName: ""        # "" → cluster default
+  accessMode: ReadWriteOnce
+  size: 10Gi
+
+livenessProbe:
+  httpGet:
+    path: /healthz
+    port: http
+  initialDelaySeconds: 10
+  periodSeconds: 10
+  timeoutSeconds: 2
+  failureThreshold: 3
+
+readinessProbe:
+  httpGet:
+    path: /readyz
+    port: http
+  initialDelaySeconds: 10
+  periodSeconds: 5
+  timeoutSeconds: 2
+  failureThreshold: 3
+
+# -- Prometheus Operator ServiceMonitor — only useful if your cluster runs
+# kube-prometheus-stack or similar. Off by default.
+serviceMonitor:
+  enabled: false
+  interval: 30s
+  scrapeTimeout: 10s
+  labels: {}
+  namespaceSelector: {}
+
+# -- Periodic retraining via a CronJob that POSTs /tasks/{name}/train.
+# Off by default — most pilots train ad-hoc via API. For a recurring
+# refresh, enable and set the schedule + the tasks to retrain.
+retraining:
+  enabled: false
+  schedule: "0 */6 * * *"
+  tasks:
+    - cpu_forecast_arima
+  dataSource:
+    kind: prometheus
+    window: 24h
+    step: 1m
+
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 1000
+  fsGroup: 1000
+
+securityContext:
+  allowPrivilegeEscalation: false
+  capabilities:
+    drop:
+      - ALL
+  readOnlyRootFilesystem: false   # uv writes bytecode under /app/.venv at startup
+
+nodeSelector: {}
+tolerations: []
+affinity: {}
+
+nameOverride: ""
+fullnameOverride: ""

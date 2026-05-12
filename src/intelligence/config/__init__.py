@@ -2,24 +2,30 @@
 
 from intelligence.config.settings import (
     AppConfig,
+    ArimaTaskConfig,
     BootstrapConfig,
+    DriftTaskConfig,
     IntelligenceConfig,
-    MlflowConfig,
+    LstmTaskConfig,
     ModelRepoConfig,
     PrometheusConfig,
-    TaskConfig,
+    TaskInstanceConfig,
     TelemetryConfig,
+    XgbTaskConfig,
     load_config,
 )
 
 __all__ = [
     "AppConfig",
+    "ArimaTaskConfig",
     "BootstrapConfig",
+    "DriftTaskConfig",
     "IntelligenceConfig",
-    "MlflowConfig",
+    "LstmTaskConfig",
     "ModelRepoConfig",
     "PrometheusConfig",
-    "TaskConfig",
+    "TaskInstanceConfig",
     "TelemetryConfig",
+    "XgbTaskConfig",
     "load_config",
 ]

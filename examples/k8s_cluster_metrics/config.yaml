@@ -1,0 +1,44 @@
+# Kubernetes cluster metrics — four tasks against a typical
+# kube-prometheus-stack deployment. Edit the namespace filter and the
+# Prometheus endpoint for your cluster.
+
+intelligence:
+  telemetry:
+    source: prometheus
+    prometheus:
+      endpoint: http://prometheus.monitoring.svc:9090
+      # token_env: PROM_TOKEN
+
+  tasks:
+    # Cluster-wide CPU utilisation (all nodes averaged).
+    cluster_cpu_arima:
+      kind: arima
+      feature: cpu
+      value_range: [0.0, 1.0]
+      steps_back: 1
+      query: '1 - avg(rate(node_cpu_seconds_total{mode="idle"}[5m]))'
+
+    # Cluster-wide memory usage (fraction of total memory in use).
+    cluster_mem_arima:
+      kind: arima
+      feature: mem
+      value_range: [0.0, 1.0]
+      steps_back: 1
+      query: '1 - (sum(node_memory_MemAvailable_bytes) / sum(node_memory_MemTotal_bytes))'
+
+    # Aggregate CPU rate (in cores) for pods in one namespace.
+    # value_range widened — this is unscaled cores, not a fraction.
+    pod_cpu_arima:
+      kind: arima
+      feature: cpu
+      value_range: [0.0, 32.0]
+      steps_back: 1
+      query: 'sum(rate(container_cpu_usage_seconds_total{namespace="my-app"}[5m]))'
+
+    # Aggregate memory (fraction of cluster total) used by one namespace's pods.
+    pod_mem_arima:
+      kind: arima
+      feature: mem
+      value_range: [0.0, 1.0]
+      steps_back: 1
+      query: 'sum(container_memory_working_set_bytes{namespace="my-app"}) / sum(machine_memory_bytes)'

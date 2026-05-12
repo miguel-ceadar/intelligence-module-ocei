@@ -116,6 +116,71 @@ def test_train_no_longer_raises_for_prometheus_descriptor():
     fake_loader.assert_called_once()
 
 
+def test_predict_threads_horizon_into_model(task):
+    """Wave 1 #2: ``PredictRequest.horizon`` flows through to ``Model.predict``."""
+    from intelligence.api import schemas as api_schemas
+
+    if "horizon" not in api_schemas.PredictRequest.model_fields:
+        pytest.skip("PredictRequest.horizon not implemented yet")
+
+    with mock.patch("bentoml.picklable_model.get") as get:
+        get.return_value = mock.MagicMock(custom_objects={})
+        task.predict(api_schemas.PredictRequest(input_series={"x": [1.0]}, horizon=4))
+
+    call = task.model.predict.call_args
+    # Accept either positional or keyword to keep the assertion flexible
+    # while the Model Protocol settles.
+    assert call.kwargs.get("horizon") == 4 or (len(call.args) >= 3 and call.args[2] == 4)
+
+
+def test_predict_rejects_horizon_above_input_spec_max():
+    """When ``input_spec.max_horizon`` is set, requests above it get 422
+    (``ContractViolation``) at the API boundary — no Bento fetch needed.
+    """
+    from intelligence.api import schemas as api_schemas
+    from intelligence.tasks.contracts import ContractViolation, InputSpec
+
+    if "max_horizon" not in InputSpec.model_fields:
+        pytest.skip("InputSpec.max_horizon not implemented yet")
+    if "horizon" not in api_schemas.PredictRequest.model_fields:
+        pytest.skip("PredictRequest.horizon not implemented yet")
+
+    spec = InputSpec(
+        n_features=1, feature_names=["x"], steps_back=1, max_horizon=2,
+    )
+    t = BaseTask(name="t", model=_make_model(), data_loader=_make_loader(), input_spec=spec)
+    with pytest.raises(ContractViolation, match="horizon"):
+        t.predict(api_schemas.PredictRequest(input_series={"x": [0.5]}, horizon=5))
+
+
+def test_predict_allows_horizon_within_max(task):
+    """``horizon`` at or below ``max_horizon`` passes through cleanly."""
+    from intelligence.api import schemas as api_schemas
+    from intelligence.tasks.contracts import InputSpec
+
+    if "max_horizon" not in InputSpec.model_fields:
+        pytest.skip("InputSpec.max_horizon not implemented yet")
+    if "horizon" not in api_schemas.PredictRequest.model_fields:
+        pytest.skip("PredictRequest.horizon not implemented yet")
+
+    spec = InputSpec(
+        n_features=1, feature_names=["x"], steps_back=1, max_horizon=3,
+    )
+    # ``allow_unverified_models=True`` skips the Bento.custom_objects spec
+    # check — the fake bento here doesn't carry one.
+    t = BaseTask(
+        name="t",
+        model=_make_model(),
+        data_loader=_make_loader(),
+        input_spec=spec,
+        allow_unverified_models=True,
+    )
+    with mock.patch("bentoml.picklable_model.get") as get:
+        get.return_value = mock.MagicMock(custom_objects={})
+        t.predict(api_schemas.PredictRequest(input_series={"x": [0.5]}, horizon=3))
+    t.model.predict.assert_called_once()
+
+
 def test_predict_raises_filenotfound_when_no_model_in_store(task):
     """Without a saved Bento, predict must raise FileNotFoundError —
     the API layer translates that to 503 (see service.predict)."""
@@ -124,6 +189,6 @@ def test_predict_raises_filenotfound_when_no_model_in_store(task):
         "bentoml.picklable_model.get",
         side_effect=bentoml.exceptions.NotFound("no such model"),
     ):
-        with pytest.raises(FileNotFoundError, match="no trained model"):
+        with pytest.raises(FileNotFoundError, match="no Bento"):
             task.predict(PredictRequest(input_series={"x": [1.0]}))
     assert not task.is_loaded()

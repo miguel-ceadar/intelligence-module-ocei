@@ -4,13 +4,14 @@ Wraps ``ModelTrainer.train_pytorch`` for the ``Model`` contract.
 
 ``train_pytorch`` expects components produced by ``make_lstm_prepare``:
   - ``X_train`` / ``X_test``: torch tensors shape ``(samples, look_back, num_variables)``.
-  - ``y_train`` / ``y_test``: torch tensors shape ``(samples, num_variables)``.
+  - ``y_train`` / ``y_test``: torch tensors shape ``(samples, horizon * num_variables)``.
   - ``train_dataset`` / ``test_dataset``: ``TimeSeriesDataset`` instances.
   - ``batch_size``.
   - ``scaler_obj``: a single MinMaxScaler fit on the raw multivariate data,
     used to inverse-transform predictions and to normalize predict input.
   - ``model_parameters``: ``input_size``, ``output_size``, ``hidden_size``,
-    ``num_epochs``. Optional: ``distill``.
+    ``num_epochs``. Optional: ``distill``. ``output_size`` is the trained
+    horizon — predict refuses request horizons above it.
 """
 
 from __future__ import annotations
@@ -22,6 +23,8 @@ from typing import Any
 import numpy as np
 import pandas as pd
 from sklearn.preprocessing import MinMaxScaler
+
+from intelligence.api.schemas import ForecastPoint
 
 logger = logging.getLogger(__name__)
 
@@ -65,6 +68,7 @@ class LstmModel:
             "input_size": params["input_size"],
             "output_size": params["output_size"],
             "hidden_size": params["hidden_size"],
+            "horizon": params["output_size"],   # alias kept for clarity at predict
             "model_metrics": metrics,
             **(extras or {}),
         }
@@ -78,7 +82,21 @@ class LstmModel:
         )
         return bento, _coerce_jsonable_nested(metrics)
 
-    def predict(self, bento_model: Any, input_series: dict[str, list[float]]) -> Any:
+    def predict(
+        self,
+        bento_model: Any,
+        input_series: dict[str, list[float]],
+        horizon: int = 1,
+    ) -> list[ForecastPoint]:
+        """Direct multi-output: the network was trained with
+        ``output_size=trained_horizon`` and emits that many values in a
+        single forward pass. Request ``horizon`` above the trained value
+        is refused — retrain with a larger output window. Below it,
+        truncate to the requested length.
+
+        No native CIs (MC-dropout deferred per memory note); each
+        ``ForecastPoint.lower`` / ``upper`` stays ``None``.
+        """
         import torch
 
         if not input_series:
@@ -87,6 +105,15 @@ class LstmModel:
         look_back = int(bento_model.custom_objects["look_back"])
         num_variables = int(bento_model.custom_objects["num_variables"])
         scaler = bento_model.custom_objects["scaler_obj"]
+        trained_horizon = int(bento_model.custom_objects.get(
+            "horizon", bento_model.custom_objects.get("output_size", 1)
+        ))
+
+        if horizon > trained_horizon:
+            raise ValueError(
+                f"horizon {horizon} exceeds trained output_size={trained_horizon}; "
+                f"retrain with a larger output window or request a shorter horizon"
+            )
 
         # Stack the input series in declared order, take the last ``look_back``
         # observations across all variables → shape (look_back, num_variables).
@@ -110,20 +137,36 @@ class LstmModel:
         net = bento_model.load_model()  # actual nn.Module
         net.eval()
         with torch.no_grad():
-            y_scaled = net(x).cpu().numpy()              # (1, num_variables)
-        y = scaler.inverse_transform(y_scaled)
+            y_scaled = net(x).cpu().numpy()             # (1, trained_horizon * num_variables)
+
+        # The scaler was fit on (n, num_variables); inverse_transform expects
+        # that shape regardless of how many horizon steps we're decoding.
+        # Reshape (1, H * V) -> (H, V), inverse, then take the first `horizon` rows.
+        y_flat = y_scaled.reshape(trained_horizon, num_variables)
+        y_raw = scaler.inverse_transform(y_flat)        # (trained_horizon, num_variables)
+        y_raw = y_raw[:horizon]                          # truncate to requested
+
         if num_variables == 1:
-            return round(float(y[0, 0]), 4)
-        return [round(float(v), 4) for v in y[0]]
+            return [ForecastPoint(value=round(float(v), 4)) for v in y_raw[:, 0]]
+        # Multivariate forecasts not yet shipped (Wave 2 multi-variate work).
+        # Returning the first variable keeps the shape contract; pilots that
+        # need full multivariate output should not request horizon at this stage.
+        return [ForecastPoint(value=round(float(row[0]), 4)) for row in y_raw]
 
 
 def make_lstm_prepare(
     look_back: int = 6,
     num_variables: int = 1,
     batch_size: int = 64,
+    horizon: int = 1,
 ) -> Callable[[pd.DataFrame], dict]:
     """Build a ``prepare`` callable that produces LSTM-shaped components
     (3-D X tensors + ``TimeSeriesDataset`` instances).
+
+    ``horizon`` controls the target window: the supervised structure
+    emits a ``(samples, horizon * num_variables)`` y-tensor so the
+    network can be trained for multi-step direct output. Pair with
+    ``model_parameters["output_size"] = horizon * num_variables``.
     """
 
     def prepare(df: pd.DataFrame) -> dict:
@@ -148,13 +191,14 @@ def make_lstm_prepare(
         scaled_train = scaler.transform(train_df)
         scaled_test = scaler.transform(test_df)
 
-        sup_train = _ts_supervised_structure(scaled_train, n_in=look_back, n_out=1)
-        sup_test = _ts_supervised_structure(scaled_test, n_in=look_back, n_out=1)
+        sup_train = _ts_supervised_structure(scaled_train, n_in=look_back, n_out=horizon)
+        sup_test = _ts_supervised_structure(scaled_test, n_in=look_back, n_out=horizon)
 
-        x_train = sup_train[:, :-num_variables].reshape(-1, look_back, num_variables)
-        y_train = sup_train[:, -num_variables:]
-        x_test = sup_test[:, :-num_variables].reshape(-1, look_back, num_variables)
-        y_test = sup_test[:, -num_variables:]
+        y_width = horizon * num_variables
+        x_train = sup_train[:, :-y_width].reshape(-1, look_back, num_variables)
+        y_train = sup_train[:, -y_width:]
+        x_test = sup_test[:, :-y_width].reshape(-1, look_back, num_variables)
+        y_test = sup_test[:, -y_width:]
 
         x_train_t = torch.from_numpy(x_train).float()
         y_train_t = torch.from_numpy(y_train).float()
@@ -172,6 +216,7 @@ def make_lstm_prepare(
             "scaler_obj": scaler,
             "look_back": look_back,
             "num_variables": num_variables,
+            "horizon": horizon,
         }
 
     return prepare

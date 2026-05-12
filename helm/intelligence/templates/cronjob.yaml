@@ -1,0 +1,33 @@
+{{- if .Values.retraining.enabled -}}
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: {{ include "intelligence.fullname" . }}-retrain
+  labels:
+    {{- include "intelligence.labels" . | nindent 4 }}
+spec:
+  schedule: {{ .Values.retraining.schedule | quote }}
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      template:
+        spec:
+          restartPolicy: OnFailure
+          containers:
+            - name: retrain
+              image: curlimages/curl:8.6.0
+              command:
+                - /bin/sh
+                - -c
+                - |
+                  set -e
+                  {{- range .Values.retraining.tasks }}
+                  echo "Retraining {{ . }}..."
+                  curl -fsS -X POST \
+                    -H 'Content-Type: application/json' \
+                    -d '{"data_source": {{ $.Values.retraining.dataSource | toJson }}}' \
+                    http://{{ include "intelligence.fullname" $ }}:{{ $.Values.service.port }}/tasks/{{ . }}/train
+                  {{- end }}
+{{- end -}}

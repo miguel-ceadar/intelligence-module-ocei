@@ -1,0 +1,43 @@
+# Memory forecasting — four tasks against your Prometheus.
+# Override the endpoint via INTELLIGENCE_TELEMETRY__PROMETHEUS__ENDPOINT
+# at deploy time, or edit it inline.
+
+intelligence:
+  telemetry:
+    source: prometheus
+    prometheus:
+      endpoint: http://prometheus.example.com:9090
+
+  tasks:
+    mem_forecast_arima:
+      kind: arima
+      feature: mem
+      value_range: [0.0, 1.0]
+      steps_back: 1
+      query: '1 - (node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes)'
+
+    mem_forecast_xgb:
+      kind: xgb
+      feature: mem
+      value_range: [0.0, 1.0]
+      steps_back: 6
+      query: '1 - (node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes)'
+
+    mem_forecast_lstm:
+      kind: lstm
+      feature: mem
+      value_range: [0.0, 1.0]
+      steps_back: 6
+      batch_size: 16
+      query: '1 - (node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes)'
+      model_params:
+        hidden_size: 4
+        num_epochs: 3
+
+    mem_forecast_arima_drift:
+      kind: drift
+      feature: mem
+      value_range: [0.0, 1.0]
+      forecaster: mem_forecast_arima
+      chunk_size: 12
+      query: '1 - (node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes)'

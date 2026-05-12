@@ -20,15 +20,18 @@ ENV UV_LINK_MODE=copy \
 
 # Step 1: install deps without the project. This layer only invalidates when
 # pyproject.toml or uv.lock change, so source-only edits skip the dep install.
+# --extra drift bundles nannyml so the shipped image can serve drift tasks
+# out of the box. Pilots who don't run drift can build their own slimmer
+# image by dropping that flag.
 COPY pyproject.toml uv.lock README.md ./
 RUN --mount=type=cache,target=/root/.cache/uv \
-    uv sync --locked --no-install-project --no-dev
+    uv sync --locked --no-install-project --no-dev --extra drift
 
 # Step 2: install the project itself, non-editable so /app/.venv is
 # self-contained and can be copied without src/ tagging along.
 COPY src/ ./src/
 RUN --mount=type=cache,target=/root/.cache/uv \
-    uv sync --locked --no-dev --no-editable
+    uv sync --locked --no-dev --no-editable --extra drift
 
 
 FROM python:3.11-slim

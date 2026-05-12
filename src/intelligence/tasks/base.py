@@ -10,15 +10,15 @@ If a task type ever needs different lifecycle (e.g. anomaly tasks want
 a custom drift wiring), subclass ``BaseTask`` and override the relevant
 method. Don't subclass eagerly — empty subclasses are noise.
 
-Tasks are looked up by name. ``build_registry_from_config`` constructs
-a registry from a list of names by calling factories registered via
-``@register_builtin`` (see ``catalog.py``).
+Tasks are looked up by name. ``build_registry_from_config`` walks the
+typed ``cfg.tasks`` dict and dispatches each block to a per-kind
+builder under ``intelligence.tasks.builders``.
 """
 
 from __future__ import annotations
 
 import logging
-from collections.abc import Callable
+from collections.abc import Callable  # noqa: F401  used by typing
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
 
@@ -131,7 +131,14 @@ class BaseTask:
     # Bentos that predate the contract are refused. Override for
     # debugging or accepted-risk situations.
     allow_unverified_models: bool = False
-    _cached_bento: Any = field(default=None, init=False, repr=False)
+    # Pin this task's predict path to a specific Bento version. Useful
+    # for staged rollouts or rolling back a bad model without touching
+    # client code. A request's ``model_version`` overrides this.
+    pinned_version: str | None = None
+    # Cache resolved Bentos by version string. ``"latest"`` is invalidated
+    # on each train (a new train shifts what ``latest`` means); pinned
+    # versions are immutable once written, so their cache entries stay.
+    _cached_bentos: dict[str, Any] = field(default_factory=dict, init=False, repr=False)
     # Bootstrap-on-startup state (see ``intelligence.tasks.bootstrap``).
     # ``pending`` is the initial state; the coroutine flips it to
     # ``running`` → ``complete`` / ``failed``. ``/readyz`` only blocks
@@ -152,7 +159,7 @@ class BaseTask:
         return bool(getattr(self.model, "has_drift", False)) if self.model is not None else False
 
     def is_loaded(self) -> bool:
-        return self._cached_bento is not None
+        return bool(self._cached_bentos)
 
     def is_ready(self) -> tuple[bool, str]:
         """Readiness probe — delegates to the data_loader if it has one."""
@@ -166,18 +173,26 @@ class BaseTask:
                 return False, f"data_loader probe raised: {e}"
         return True, "ok"
 
-    def _load_bento(self) -> Any:
-        if self._cached_bento is not None:
-            return self._cached_bento
+    def _resolve_version(self, requested: str | None) -> str:
+        """Resolve the version to load. Precedence: request → task pin → latest."""
+        return requested or self.pinned_version or "latest"
+
+    def _load_bento(self, version: str | None = None) -> Any:
+        resolved = self._resolve_version(version)
+        if resolved in self._cached_bentos:
+            return self._cached_bentos[resolved]
         import bentoml
         try:
-            self._cached_bento = bentoml.picklable_model.get(f"{self.bento_name}:latest")
+            bento = bentoml.picklable_model.get(f"{self.bento_name}:{resolved}")
         except bentoml.exceptions.NotFound:
-            self._cached_bento = None
-        return self._cached_bento
+            return None
+        self._cached_bentos[resolved] = bento
+        return bento
 
     def _invalidate(self) -> None:
-        self._cached_bento = None
+        # A new train only shifts what ``:latest`` means; pinned versions
+        # are immutable so their cache entries stay valid.
+        self._cached_bentos.pop("latest", None)
 
     def train(self, req: TrainRequest) -> TrainResponse:
         # Descriptor dispatch is the loader's job — wrong kind raises
@@ -196,16 +211,19 @@ class BaseTask:
         # cheap rejection of obviously-bad requests, no Bento fetch needed.
         if self.input_spec is not None:
             self.input_spec.validate(req.input_series)
+            self.input_spec.validate_horizon(req.horizon)
 
-        bento = self._load_bento()
+        bento = self._load_bento(version=req.model_version)
         if bento is None:
+            resolved = self._resolve_version(req.model_version)
             raise FileNotFoundError(
-                f"no trained model for {self.name}; "
-                f"POST /tasks/{self.name}/train first"
+                f"no Bento {self.bento_name}:{resolved} in the local store; "
+                f"POST /tasks/{self.name}/train first, or pin to an existing version"
             )
         self._verify_bento(bento)
-        prediction = self.model.predict(bento, req.input_series)
-        return PredictResponse(prediction=prediction)
+        prediction = self.model.predict(bento, req.input_series, horizon=req.horizon)
+        served = str(getattr(bento, "tag", "")).split(":")[-1] or None
+        return PredictResponse(prediction=prediction, model_version=served)
 
     def _verify_bento(self, bento: Any) -> None:
         """Refuse predict if the loaded Bento's stored contract doesn't
@@ -290,48 +308,18 @@ def _spec_mismatch(stored: Any, expected: InputSpec) -> str | None:
     return None
 
 
-# ---- Builtin factory catalog ------------------------------------------
-
-# Factories take the full ``IntelligenceConfig`` so they can pick their
-# loader based on ``cfg.telemetry`` (static CSV vs PromQL). The factory
-# body itself is where heavy imports happen — defining the function
-# imports nothing.
-TaskFactory = Callable[["IntelligenceConfig"], Task]
-
-_BUILTIN_FACTORIES: dict[str, TaskFactory] = {}
-
-
-def register_builtin(name: str) -> Callable[[TaskFactory], TaskFactory]:
-    """Decorator: register a factory function under ``name``."""
-
-    def wrap(factory: TaskFactory) -> TaskFactory:
-        if name in _BUILTIN_FACTORIES:
-            raise ValueError(f"builtin task factory already registered: {name}")
-        _BUILTIN_FACTORIES[name] = factory
-        return factory
-
-    return wrap
-
-
-def builtin_task_factory(name: str) -> TaskFactory:
-    if name not in _BUILTIN_FACTORIES:
-        raise KeyError(f"no builtin task named: {name}")
-    return _BUILTIN_FACTORIES[name]
-
-
 def build_registry_from_config(cfg: "IntelligenceConfig") -> TaskRegistry:
-    """Build a registry containing exactly the tasks in ``cfg.enabled_tasks``.
+    """Build a registry from the typed ``cfg.tasks`` dict.
 
-    Imports ``catalog.py`` lazily — that module's ``@register_builtin``
-    decorators populate ``_BUILTIN_FACTORIES``. Each factory body lazy-
-    imports its model, so unconfigured tasks don't pull their deps.
-    Each factory receives the full ``cfg`` so it can consult
-    ``cfg.telemetry`` to pick a loader.
+    Iterates each ``(name, task_cfg)`` pair, dispatches on
+    ``task_cfg.kind`` via the builder registry, and registers the
+    resulting ``BaseTask``. Each builder body is where heavy imports
+    happen — unused kinds don't pull their model deps.
     """
-    import intelligence.tasks.catalog  # noqa: F401  populates _BUILTIN_FACTORIES
+    from intelligence.tasks.builders import get_builder
 
     reg = TaskRegistry()
-    for name in cfg.enabled_tasks:
-        factory = builtin_task_factory(name)
-        reg.register(factory(cfg))
+    for name, task_cfg in cfg.tasks.items():
+        builder = get_builder(task_cfg.kind)
+        reg.register(builder(name, task_cfg, cfg))
     return reg

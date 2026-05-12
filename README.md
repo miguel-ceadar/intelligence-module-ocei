@@ -70,6 +70,17 @@ uv sync
 uv run uvicorn intelligence.api.service:app --port 3000
 ```
 
+### Kubernetes (Helm)
+
+A Helm chart at [`helm/intelligence`](helm/intelligence/) installs the
+service alongside ConfigMap / Secret / PVC / optional ServiceMonitor +
+retraining CronJob. See the [chart README](helm/intelligence/README.md)
+for values and the multi-replica caveat.
+
+```bash
+helm install intelligence ./helm/intelligence -f your-values.yaml
+```
+
 ### Calling the API
 
 Train + predict on the bundled CSV sample — works without a Prometheus:
@@ -96,21 +107,35 @@ envelope.
 
 ## API
 
-| Method | Path | |
-|---|---|---|
-| `GET`  | `/healthz`              | liveness |
-| `GET`  | `/readyz`               | readiness — registry + bento store + per-task probes + bootstrap state |
-| `GET`  | `/tasks`                | list enabled tasks |
-| `POST` | `/tasks/{task}/train`   | train from a data source, persist a Bento |
-| `POST` | `/tasks/{task}/predict` | predict from the trained Bento |
-| `GET`  | `/models`               | list Bento models in the local store |
-| `POST` | `/models/sync`          | push to or pull from a Hugging Face repo (opt-in) |
+The full HTTP surface — train, predict, list models, version pinning,
+HF push/pull, Prometheus `/metrics` — is documented at `/docs` (Swagger
+UI) and `/redoc` once the service is running.
 
 Each task declares an input contract (feature count, window length,
-expected value range). Requests that don't match get `422` before the
-model is touched. Trained models carry the contract with them, and
-pretrained models pulled from elsewhere are checked against it too —
-see [Pretrained Bentos](#pretrained-bentos).
+expected value range); mismatched requests get `422` before reaching
+the model. Predict serves `:latest` by default — pin a specific
+version via the request's `model_version` or the task config's
+`pinned_version` (request wins; see [Pretrained Bentos](#pretrained-bentos)
+for the validation rules around pulled models).
+
+Predict requests accept an optional `horizon` (default `1`). The
+response's `prediction` field is a list of `{value, lower, upper}`
+points of length `horizon`; `lower`/`upper` carry a 95 % confidence
+interval when the model exposes one (ARIMA does; recursive XGB and
+direct-output LSTM leave them empty).
+
+### Observability
+
+`/metrics` exposes Prometheus-format counters and histograms: HTTP
+request count + latency (route-normalised so per-task paths collapse
+to `/tasks/{task}/...`), per-task train and predict counts + durations,
+and a gauge for registered tasks. Probe endpoints (`/healthz`,
+`/readyz`) and `/metrics` itself are excluded to keep the time series
+honest.
+
+Logs are emitted as JSON to stdout (`{timestamp, level, logger,
+message, request_id, ...}`). Every HTTP request carries a short
+`request_id` you can grep across logs for one call's full trace.
 
 ## Configuration
 
@@ -218,79 +243,87 @@ in the local store), but `predict` won't serve from it. Override per
 task with `allow_unverified_models=True` when intentionally accepting
 the risk.
 
-## Adding a task
+## Extending
 
-Tasks compose `(data_loader, model)` and register by name. A new
-variant is one factory in `src/intelligence/tasks/catalog.py`:
+A task is a `(data source × model algorithm)` pairing declared in
+YAML. The lib ships four algorithm **kinds**; everything else — which
+metric, which PromQL, which task name — is config. To get any new
+forecast wired up, you add a block under `tasks:` and pick a `kind:`.
 
-```python
-@register_builtin("mem_forecast_arima")
-def make_mem_forecast_arima(cfg: IntelligenceConfig) -> BaseTask:
-    from intelligence.ml.models.arima import ArimaModel
-    from intelligence.tasks.contracts import InputSpec
+### Add a task (no code)
 
-    return BaseTask(
-        name="mem_forecast_arima",
-        model=ArimaModel(p=3, d=1, q=0),
-        data_loader=build_loader_for_task(cfg, "mem_forecast_arima", value_col="MEM"),
-        input_spec=InputSpec(
-            n_features=1,
-            feature_names=["mem"],
-            steps_back=1,
-            value_range={"mem": (0.0, 1.0)},
-        ),
-    )
+Drop a block into your `config.yaml` (or `compose/intelligence.yaml`):
+
+```yaml
+intelligence:
+  tasks:
+    mem_forecast_arima:
+      kind: arima
+      feature: mem
+      value_range: [0.0, 1.0]
+      steps_back: 1
+      query: '1 - (node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes)'
 ```
 
-For an XGB or LSTM variant, pass a custom `prepare` so the loader
-produces the supervised-structure components the trainer expects:
+That's the whole change — no Python edits, no rebuild, no factory file.
+Restart the service and `/tasks/mem_forecast_arima/{train,predict}`
+are live. See [`examples/`](examples/) for full configs covering CPU,
+memory, and energy forecasting end-to-end.
 
-```python
-data_loader=build_loader_for_task(
-    cfg, "cpu_forecast_xgb",
-    prepare=make_xgb_prepare(look_back=6, num_variables=1),
-),
-```
+### Kind reference
 
-A new model algorithm is one new file under `src/intelligence/ml/models/`
-implementing the `Model` protocol, plus one factory using it.
+| `kind` | What it does | Required | Common optional |
+|---|---|---|---|
+| `arima` | Univariate forecast (single or multi-step, native 95 % CI) | `feature`, `query`† | `steps_back`, `value_range`, `model_params: {p, d, q}` |
+| `xgb` | Sliding-window forecast (recursive multi-step, no CI) | `feature`, `query`† | `steps_back` (window length, default 6), `value_range`, `model_params: {n_estimators, max_depth, eta, ...}` |
+| `lstm` | Sliding-window forecast (direct multi-step, PyTorch) | `feature`, `query`† | `steps_back`, `batch_size`, `horizon` (trained max, default 1), `model_params: {hidden_size, num_epochs, ...}` |
+| `drift` | NannyML univariate drift alerting on a chunk | `feature`, `forecaster` (name of a sibling task), `query`† | `chunk_size` (default 12), `value_range`, `metric` (default `jensen_shannon`) |
 
-A drift task is one new factory using `DriftDetectionTask` and
-`make_drift_prepare`:
+† `query:` required when `telemetry.source: prometheus`; ignored for
+`static` (the train request body supplies the CSV name).
 
-```python
-@register_builtin("mem_forecast_arima_drift")
-def make_mem_forecast_arima_drift(cfg: IntelligenceConfig) -> BaseTask:
-    from intelligence.tasks.contracts import InputSpec
-    from intelligence.tasks.drift import DriftDetectionTask, make_drift_prepare
+### Add a new model algorithm (lib-side change)
 
-    return DriftDetectionTask(
-        name="mem_forecast_arima_drift",
-        forecaster_task_name="mem_forecast_arima",
-        model=None,
-        data_loader=build_loader_for_task(
-            cfg, "mem_forecast_arima_drift",
-            prepare=make_drift_prepare(value_col="MEM"),
-        ),
-        chunk_size=12,
-        input_spec=InputSpec(n_features=1, feature_names=["mem"], steps_back=12),
-    )
-```
+A new kind — say `prophet` or `transformer` — is three local edits:
+
+1. New model class in `src/intelligence/ml/models/<kind>.py`
+   implementing the `Model` protocol (`train` + `predict`).
+2. New per-kind config schema in `src/intelligence/config/settings.py`
+   alongside the existing `ArimaTaskConfig` / `XgbTaskConfig` /
+   `LstmTaskConfig` / `DriftTaskConfig`, included in the
+   `TaskInstanceConfig` discriminated union.
+3. New builder in `src/intelligence/tasks/builders/<kind>.py` that
+   constructs a `BaseTask` from the config block. Register it in
+   `BUILDERS` in `tasks/builders/__init__.py`.
+
+Pilots then enable it with `kind: <new>` in YAML.
+
+### Add a new data source (lib-side change)
+
+Sources like Kafka or OpenTelemetry are heavier — they extend
+`TelemetryConfig.source`, add a new `TelemetrySource` Protocol
+implementation, and add a branch in `build_loader_for_task`. See
+`src/intelligence/telemetry/` for the existing two (static, prometheus).
 
 ## Layout
 
 ```
-src/intelligence/
-├── api/           FastAPI service + Pydantic schemas + HF push/pull
-├── tasks/         Task protocol, BaseTask, registry, catalog, loaders,
-│   │               bootstrap, DriftDetectionTask
-│   └── contracts/ per-task InputSpec
-├── telemetry/     TelemetrySource protocol + StaticSource + PrometheusSource
+src/intelligence/         the library
+├── api/                  FastAPI service + Pydantic schemas + HF push/pull
+├── tasks/                Task protocol + BaseTask + registry + loaders
+│   ├── builders/         one builder per algorithm kind (arima/xgb/lstm/drift)
+│   └── contracts/        per-task InputSpec
+├── telemetry/            TelemetrySource Protocol + StaticSource + PrometheusSource
 ├── ml/
-│   ├── models/    Model protocol + ArimaModel / XgbModel / LstmModel
-│   └── trainers/  ModelTrainer + LSTM defs + metrics + MLflow helper
-├── config/        typed config (pydantic-settings + YAML)
-└── data/samples/  bundled sample CSVs (ship with the wheel)
+│   ├── models/           Model protocol + ArimaModel / XgbModel / LstmModel
+│   └── trainers/         ModelTrainer + LSTM defs + metrics + MLflow helper
+├── config/               typed config (pydantic-settings + YAML)
+└── data/samples/         bundled sample CSVs (ship with the wheel)
+
+examples/                 ready-to-run task configurations
+├── cpu_forecast/         four kinds against a CPU PromQL
+├── mem_forecast/         four kinds against a memory PromQL
+└── energy_forecast/      template for Kepler-style power metrics
 ```
 
 The four user-facing domains (tasks, api, telemetry, ml) map to the

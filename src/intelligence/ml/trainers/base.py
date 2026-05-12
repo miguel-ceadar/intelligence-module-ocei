@@ -249,15 +249,23 @@ class ModelTrainer:
 
         outputs = model(self.data_components["X_test"].to(device_t))
         y_pred = outputs.cpu().detach().numpy().reshape(outputs.shape[0], outputs.shape[1])
-        y_pred = self.data_components["scaler_obj"].inverse_transform(y_pred)
-        y_test = self.data_components["scaler_obj"].inverse_transform(
-            self.data_components["y_test"]
-        )
+        # y is shape (samples, horizon * num_variables). The scaler was fit on
+        # (*, num_variables); flatten the horizon axis to make inverse_transform
+        # shape-compatible, then restore.
+        num_variables = int(self.data_components.get("num_variables", 1))
+        samples = y_pred.shape[0]
+        y_pred_inv = self.data_components["scaler_obj"].inverse_transform(
+            y_pred.reshape(-1, num_variables)
+        ).reshape(samples, -1)
+        y_test_arr = self.data_components["y_test"]
+        y_test_inv = self.data_components["scaler_obj"].inverse_transform(
+            y_test_arr.reshape(-1, num_variables)
+        ).reshape(samples, -1)
 
         out_metrics: dict = {}
-        for i in range(y_test.shape[1]):
+        for i in range(y_test_inv.shape[1]):
             out_metrics[f"metric_{i}"] = metrics_pytorch(
-                model, y_test[:, i].reshape(-1, 1), y_pred[:, i].reshape(-1, 1)
+                model, y_test_inv[:, i].reshape(-1, 1), y_pred_inv[:, i].reshape(-1, 1)
             )
 
         logger.info("Moving torch objects to CPU")

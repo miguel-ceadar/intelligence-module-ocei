@@ -95,7 +95,30 @@ def test_train_then_predict(task: str, window: str, predict_input: list[float]) 
         timeout=30.0,
     )
     assert predict.status_code == 200, f"predict {task}: {predict.status_code} {predict.text}"
-    assert "prediction" in predict.json()
+    body = predict.json()
+    assert "prediction" in body
+    # Forecast tasks return list[ForecastPoint] of length horizon (default 1);
+    # drift task keeps a dict-shaped prediction.
+    if task.endswith("_drift"):
+        assert isinstance(body["prediction"], dict)
+    else:
+        assert isinstance(body["prediction"], list) and body["prediction"]
+        assert "value" in body["prediction"][0]
+
+
+def test_arima_multi_horizon_returns_confidence_intervals() -> None:
+    """ARIMA exposes native 95 % CIs — every point should carry both bounds."""
+    r = httpx.post(
+        f"{INTELLIGENCE_URL}/tasks/cpu_forecast_arima/predict",
+        json={"input_series": {"cpu": [0.5]}, "horizon": 4},
+        timeout=30.0,
+    )
+    assert r.status_code == 200, r.text
+    points = r.json()["prediction"]
+    assert isinstance(points, list) and len(points) == 4
+    for p in points:
+        assert p.get("lower") is not None and p.get("upper") is not None
+        assert p["lower"] <= p["value"] <= p["upper"]
 
 
 def test_readyz_after_bootstrap() -> None:

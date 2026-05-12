@@ -34,11 +34,18 @@ class InputSpec(BaseModel):
     and optional semantic metadata (``value_range``, ``units``) that
     catches unit mismatches — e.g. passing CPU as a percent (87.3) when
     the model was trained on fractional CPU (0.87).
+
+    ``max_horizon`` clamps how many steps ahead the task can serve.
+    ``None`` is unbounded (ARIMA refits each call; XGB recursive walks
+    forward as long as requested). LSTM is direct multi-output and sets
+    this to the trained ``output_size`` — request horizons above that
+    are refused at the API boundary.
     """
 
     n_features: int
     feature_names: list[str]
     steps_back: int
+    max_horizon: int | None = None
     value_range: dict[str, tuple[float, float]] = {}
     units: dict[str, str] = {}
 
@@ -91,3 +98,13 @@ class InputSpec(BaseModel):
                         f"feature {name!r} value {v} at index {i} outside trained "
                         f"range [{lo}, {hi}]{suffix}"
                     )
+
+    def validate_horizon(self, horizon: int) -> None:
+        """Raise ``ContractViolation`` when ``horizon`` exceeds the task's
+        ``max_horizon`` clamp. ``None`` means unbounded.
+        """
+        if self.max_horizon is not None and horizon > self.max_horizon:
+            raise ContractViolation(
+                f"horizon {horizon} exceeds trained max_horizon={self.max_horizon}; "
+                f"retrain with a larger output window or request a shorter horizon"
+            )

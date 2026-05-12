@@ -17,13 +17,25 @@ from __future__ import annotations
 
 import logging
 import os
+import time
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import JSONResponse
 
 from intelligence import __version__
+from intelligence.api.auth import BearerTokenMiddleware, resolve_expected_token
 from intelligence.api.model_repo import pull_from_hf, push_to_hf
+from intelligence.api.observability import (
+    PREDICT_DURATION,
+    PREDICT_TOTAL,
+    REGISTERED_TASKS,
+    TRAIN_DURATION,
+    TRAIN_TOTAL,
+    ObservabilityMiddleware,
+    configure_logging,
+    metrics_response,
+)
 from intelligence.api.schemas import (
     ModelSyncRequest,
     ModelSyncResponse,
@@ -32,6 +44,8 @@ from intelligence.api.schemas import (
 )
 from intelligence.config import load_config
 from intelligence.tasks import TaskRegistry, build_registry_from_config
+
+configure_logging()
 
 logger = logging.getLogger(__name__)
 
@@ -44,16 +58,24 @@ def _load_app_config():
 
 config = _load_app_config()
 registry = build_registry_from_config(config.intelligence)
-
-# Apply MLflow tracking URI if configured.
-if config.intelligence.mlflow.tracking_uri:
-    try:
-        import mlflow
-        mlflow.set_tracking_uri(config.intelligence.mlflow.tracking_uri)
-    except ImportError:
-        logger.warning("mlflow not installed; ignoring mlflow.tracking_uri config")
+REGISTERED_TASKS.set(len(registry))
 
 app = FastAPI(title="Intelligence Utility", version="0.1.0.dev0")
+# Order matters: ObservabilityMiddleware records every request including
+# 401s (which is useful — auth failures should be visible on /metrics).
+# Auth middleware therefore runs inside the observability one.
+app.add_middleware(ObservabilityMiddleware)
+app.add_middleware(
+    BearerTokenMiddleware,
+    expected_token=resolve_expected_token(config.intelligence.auth.token_env),
+)
+
+
+@app.get("/metrics")
+def metrics():
+    """Prometheus-format metrics for scraping. Excluded from its own
+    instrumentation to avoid self-amplifying counters."""
+    return metrics_response()
 
 
 @app.on_event("startup")
@@ -149,6 +171,38 @@ def list_tasks() -> dict:
     return {"tasks": registry.list_info()}
 
 
+@app.get("/tasks/{task_name}/versions")
+def list_task_versions(task_name: str) -> dict:
+    """Bento versions stored locally for this task, newest first.
+
+    Useful for rollback decisions: a client picks a known-good version
+    from this list and sends it as ``model_version`` on the next predict
+    request (or operators set it as ``pinned_version:`` in config).
+    """
+    if task_name not in registry:
+        raise HTTPException(status_code=404, detail=f"unknown task: {task_name}")
+    task = registry.get(task_name)
+    bento_name = getattr(task, "bento_name", task_name)
+
+    import bentoml
+    matches = [m for m in bentoml.models.list() if m.tag.name == bento_name]
+    matches.sort(key=lambda m: m.info.creation_time, reverse=True)
+
+    return {
+        "task": task_name,
+        "bento_name": bento_name,
+        "pinned_version": getattr(task, "pinned_version", None),
+        "versions": [
+            {
+                "tag": str(m.tag),
+                "version": m.tag.version,
+                "created_at": m.info.creation_time.isoformat(),
+            }
+            for m in matches
+        ],
+    }
+
+
 @app.get("/models")
 def list_models() -> dict:
     """List Bento models in the local store.
@@ -169,15 +223,23 @@ def train(task_name: str, req: TrainRequest):
     if task_name not in registry:
         raise HTTPException(status_code=404, detail=f"unknown task: {task_name}")
     task = registry.get(task_name)
+    start = time.monotonic()
     try:
         result = task.train(req)
     except NotImplementedError as e:
-        # Defensive: a model adapter signalling an unsupported parameter.
+        TRAIN_TOTAL.labels(task=task_name, status="unsupported").inc()
         return JSONResponse(status_code=501, content={"detail": str(e)})
     except FileNotFoundError as e:
+        TRAIN_TOTAL.labels(task=task_name, status="not_found").inc()
         raise HTTPException(status_code=404, detail=str(e)) from e
     except (ValueError, TypeError) as e:
+        TRAIN_TOTAL.labels(task=task_name, status="invalid").inc()
         raise HTTPException(status_code=422, detail=str(e)) from e
+    except Exception:
+        TRAIN_TOTAL.labels(task=task_name, status="error").inc()
+        raise
+    TRAIN_TOTAL.labels(task=task_name, status="ok").inc()
+    TRAIN_DURATION.labels(task=task_name).observe(time.monotonic() - start)
     return result.model_dump()
 
 
@@ -221,22 +283,30 @@ def predict(task_name: str, req: PredictRequest):
     if task_name not in registry:
         raise HTTPException(status_code=404, detail=f"unknown task: {task_name}")
     task = registry.get(task_name)
+    start = time.monotonic()
     try:
         result = task.predict(req)
     except FileNotFoundError as e:
-        # No trained model yet — caller needs to train first.
+        PREDICT_TOTAL.labels(task=task_name, status="no_model").inc()
         return JSONResponse(status_code=503, content={"detail": str(e)})
     except (ValueError, TypeError) as e:
+        PREDICT_TOTAL.labels(task=task_name, status="invalid").inc()
         raise HTTPException(status_code=422, detail=str(e)) from e
+    except Exception:
+        PREDICT_TOTAL.labels(task=task_name, status="error").inc()
+        raise
+    PREDICT_TOTAL.labels(task=task_name, status="ok").inc()
+    PREDICT_DURATION.labels(task=task_name).observe(time.monotonic() - start)
     return result.model_dump()
 
 
 # ---- BentoML hosting --------------------------------------------------
-# A ``bentoml.Service`` is what ``bentoml serve`` runs. We mount the
-# FastAPI app into it so routing stays clean while deployment uses
-# bentoml's runner / config / observability machinery.
+# A ``bentoml.Service`` is what ``bentoml serve`` runs (alternative to
+# ``uvicorn intelligence.api.service:app``, which is what the Docker
+# image uses). Wrapping the FastAPI app keeps both deployment paths
+# working from one entry point.
 
-import bentoml  # noqa: E402  — kept low to avoid pulling bentoml at import-time on type-only paths
+import bentoml  # noqa: E402
 
 svc = bentoml.Service(name="intelligence")
 svc.mount_asgi_app(app)

@@ -1,9 +1,9 @@
 """Unit tests for ``build_loader_for_task``.
 
 The factory helper consults ``IntelligenceConfig.telemetry`` to decide
-whether a task gets a CSV-backed loader or a PromQL-backed one. Every
-task factory in ``catalog.py`` goes through this helper — operators
-flip ``telemetry.source`` in their config to switch the whole deployment.
+whether a task gets a CSV-backed loader or a PromQL-backed one. The
+PromQL query for each task comes from the task's own config block —
+callers (the per-kind builders) pass it through explicitly.
 """
 
 from __future__ import annotations
@@ -14,10 +14,7 @@ from intelligence.config.settings import IntelligenceConfig, PrometheusConfig, T
 
 
 def _cfg(**telemetry_kwargs) -> IntelligenceConfig:
-    return IntelligenceConfig(
-        enabled_tasks=["cpu_forecast_arima"],
-        telemetry=TelemetryConfig(**telemetry_kwargs),
-    )
+    return IntelligenceConfig(telemetry=TelemetryConfig(**telemetry_kwargs))
 
 
 def test_default_config_yields_static_loader():
@@ -32,24 +29,24 @@ def test_prometheus_config_yields_prometheus_loader():
 
     cfg = _cfg(
         source="prometheus",
-        prometheus=PrometheusConfig(
-            endpoint="http://prom:9090",
-            queries={"cpu_forecast_arima": 'rate(node_cpu_seconds_total[5m])'},
-        ),
+        prometheus=PrometheusConfig(endpoint="http://prom:9090"),
     )
-    loader = build_loader_for_task(cfg, "cpu_forecast_arima")
+    loader = build_loader_for_task(
+        cfg, "cpu_forecast_arima",
+        query='rate(node_cpu_seconds_total[5m])',
+    )
     assert isinstance(loader, PrometheusLoader)
     assert loader.query == 'rate(node_cpu_seconds_total[5m])'
 
 
-def test_prometheus_missing_query_for_task_raises():
+def test_prometheus_missing_query_raises():
     from intelligence.tasks.loaders import build_loader_for_task
 
     cfg = _cfg(
         source="prometheus",
-        prometheus=PrometheusConfig(endpoint="http://prom:9090", queries={}),
+        prometheus=PrometheusConfig(endpoint="http://prom:9090"),
     )
-    with pytest.raises(ValueError, match="cpu_forecast_arima"):
+    with pytest.raises(ValueError, match="no PromQL query"):
         build_loader_for_task(cfg, "cpu_forecast_arima")
 
 
@@ -63,10 +60,9 @@ def test_prometheus_loader_carries_endpoint_and_auth():
             endpoint="https://thanos.internal:10902",
             token_env="PROM_TOKEN",
             tls_skip_verify=True,
-            queries={"cpu_forecast_arima": "up"},
         ),
     )
-    loader = build_loader_for_task(cfg, "cpu_forecast_arima")
+    loader = build_loader_for_task(cfg, "cpu_forecast_arima", query="up")
     assert isinstance(loader.source, PrometheusSource)
     assert loader.source.endpoint == "https://thanos.internal:10902"
     assert loader.source.token_env == "PROM_TOKEN"
@@ -75,21 +71,20 @@ def test_prometheus_loader_carries_endpoint_and_auth():
 
 def test_value_col_kwarg_is_accepted_for_both_loader_kinds():
     """The helper forwards ``value_col`` to whichever loader it builds so
-    tasks (e.g. ``mem_forecast_arima``) can pick their target column.
+    each task (e.g. ``mem_forecast_arima``) can normalise its column name.
     """
     from intelligence.tasks.loaders import build_loader_for_task
 
-    # Static path — must accept value_col without error.
     static_loader = build_loader_for_task(_cfg(), "cpu_forecast_arima", value_col="CPU")
     assert static_loader is not None
 
-    # Prometheus path — must also accept value_col.
     prom_cfg = _cfg(
         source="prometheus",
-        prometheus=PrometheusConfig(
-            endpoint="http://prom:9090",
-            queries={"cpu_forecast_arima": "up"},
-        ),
+        prometheus=PrometheusConfig(endpoint="http://prom:9090"),
     )
-    prom_loader = build_loader_for_task(prom_cfg, "cpu_forecast_arima", value_col="value")
+    prom_loader = build_loader_for_task(
+        prom_cfg, "cpu_forecast_arima",
+        value_col="cpu",
+        query="up",
+    )
     assert prom_loader is not None

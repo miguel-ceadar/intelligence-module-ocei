@@ -10,25 +10,51 @@
 # delimits nested sections). Set them in your shell or in a `.env`
 # alongside docker-compose.yml — see `.env.example` for the full set.
 #
-# The PromQL queries below assume the target Prometheus scrapes
-# node-exporter; replace them with whatever metrics your deployment
-# exposes for CPU utilisation. Each task maps to one query that has to
-# return a single time series (one value per timestamp).
+# Each entry under `tasks:` becomes a registered HTTP endpoint at
+# `/tasks/<name>/train` and `/tasks/<name>/predict`. The `kind:` field
+# picks the algorithm (`arima` | `xgb` | `lstm` | `drift`); `feature:`
+# is the input series key clients send; `query:` is the PromQL the
+# task trains against. See `examples/` for more (metric × model)
+# combinations.
 
 intelligence:
-  enabled_tasks:
-    - cpu_forecast_arima
-    - cpu_forecast_xgb
-    - cpu_forecast_lstm
-    - cpu_forecast_arima_drift
   telemetry:
     source: prometheus
     prometheus:
       endpoint: http://prometheus.example.com:9090   # override via env or edit
       # token_env: PROM_TOKEN                       # uncomment for bearer auth
       # tls_skip_verify: false
-      queries:
-        cpu_forecast_arima: 'avg(rate(node_cpu_seconds_total{mode!="idle"}[30s]))'
-        cpu_forecast_xgb: 'avg(rate(node_cpu_seconds_total{mode!="idle"}[30s]))'
-        cpu_forecast_lstm: 'avg(rate(node_cpu_seconds_total{mode!="idle"}[30s]))'
-        cpu_forecast_arima_drift: 'avg(rate(node_cpu_seconds_total{mode!="idle"}[30s]))'
+
+  tasks:
+    cpu_forecast_arima:
+      kind: arima
+      feature: cpu
+      value_range: [0.0, 1.0]
+      steps_back: 1
+      query: 'avg(rate(node_cpu_seconds_total{mode!="idle"}[30s]))'
+
+    cpu_forecast_xgb:
+      kind: xgb
+      feature: cpu
+      value_range: [0.0, 1.0]
+      steps_back: 6
+      query: 'avg(rate(node_cpu_seconds_total{mode!="idle"}[30s]))'
+
+    cpu_forecast_lstm:
+      kind: lstm
+      feature: cpu
+      value_range: [0.0, 1.0]
+      steps_back: 6
+      batch_size: 16
+      query: 'avg(rate(node_cpu_seconds_total{mode!="idle"}[30s]))'
+      model_params:
+        hidden_size: 4
+        num_epochs: 3
+
+    cpu_forecast_arima_drift:
+      kind: drift
+      feature: cpu
+      value_range: [0.0, 1.0]
+      forecaster: cpu_forecast_arima
+      chunk_size: 12
+      query: 'avg(rate(node_cpu_seconds_total{mode!="idle"}[30s]))'

@@ -64,16 +64,8 @@ class StaticCsvLoader:
                 f"StaticCsvLoader expects StaticDataSource, got {type(descriptor).__name__}"
             )
         df = self.source.fetch_range(descriptor.name)
-        # Mirror PrometheusLoader: when the dataset is univariate and a
-        # canonical name is set, rename to it so downstream consumers
-        # (default prepare, drift's stored column_names) match the task's
-        # InputSpec feature name regardless of which header the source had.
         if self.value_col is not None:
-            value_cols = [
-                c for c in df.columns if c.lower() not in {"time", "timestamp", "date"}
-            ]
-            if len(value_cols) == 1 and value_cols[0] != self.value_col:
-                df = df.rename(columns={value_cols[0]: self.value_col})
+            df = _select_value_column(df, self.value_col)
         return self.prepare(df)
 
     def is_ready(self) -> tuple[bool, str]:
@@ -191,17 +183,18 @@ def build_loader_for_task(
     task_name: str,
     value_col: str | None = None,
     prepare: Callable[[pd.DataFrame], dict] | None = None,
+    query: str | None = None,
 ) -> StaticCsvLoader | PrometheusLoader:
     """Pick the right loader for ``task_name`` based on ``cfg.telemetry``.
 
-    Every task factory in ``catalog.py`` goes through this — operators
-    flip ``telemetry.source`` to switch the whole deployment between
-    CSV-backed (dev/test) and PromQL-backed (prod).
+    Operators flip ``telemetry.source`` to switch the whole deployment
+    between CSV-backed (dev/test) and PromQL-backed (prod).
 
-    For ``source == "prometheus"``: ``cfg.telemetry.prometheus.queries``
-    must contain a PromQL expression keyed by ``task_name``. A missing
-    query is a config error and raised here so the failure surfaces at
-    registry build (i.e. service startup), not at first request.
+    For ``source == "prometheus"`` the per-task PromQL ``query`` is
+    required. The per-kind builders pass it through from each task's
+    own ``query:`` config field; missing it is a startup error so a
+    misconfigured task fails loudly at registry build time, not at
+    first request.
     """
     if cfg.telemetry.source == "prometheus":
         prom = cfg.telemetry.prometheus
@@ -209,11 +202,10 @@ def build_loader_for_task(
             raise ValueError(
                 "telemetry.source='prometheus' requires telemetry.prometheus block"
             )
-        query = prom.queries.get(task_name)
         if query is None:
             raise ValueError(
-                f"telemetry.prometheus.queries[{task_name!r}] is not set; "
-                "add a PromQL expression for this task to your config"
+                f"no PromQL query for task {task_name!r}; "
+                "set `query:` on the task config block"
             )
         source = PrometheusSource(
             endpoint=prom.endpoint,
@@ -222,7 +214,9 @@ def build_loader_for_task(
             tls_skip_verify=prom.tls_skip_verify,
             timeout=prom.timeout,
         )
-        return prometheus_loader(source=source, query=query, value_col=value_col, prepare=prepare)
+        return prometheus_loader(
+            source=source, query=query, value_col=value_col, prepare=prepare,
+        )
 
     return static_csv_loader(value_col=value_col, prepare=prepare)
 
@@ -261,3 +255,38 @@ def _autodetect_value_column(df: pd.DataFrame) -> str:
         except (ValueError, TypeError):
             continue
     raise ValueError(f"no numeric column found in dataset; columns={list(df.columns)}")
+
+
+_TIMESTAMP_COLS = {"time", "timestamp", "date"}
+
+
+def _select_value_column(df: pd.DataFrame, value_col: str) -> pd.DataFrame:
+    """Normalise a CSV-shaped DataFrame to a single value column named
+    ``value_col``, mirroring what ``PrometheusLoader`` does for single-series
+    PromQL responses.
+
+    Univariate input → rename the lone value column.
+    Multivariate input → pick the column whose name matches ``value_col``
+    (case-insensitive) and drop the rest, keeping any timestamp column.
+    Pass-through if it already matches.
+    """
+    value_cols = [c for c in df.columns if c.lower() not in _TIMESTAMP_COLS]
+    if not value_cols:
+        return df
+
+    if len(value_cols) == 1:
+        if value_cols[0] != value_col:
+            df = df.rename(columns={value_cols[0]: value_col})
+        return df
+
+    # Multivariate — pick the matching column. Case-insensitive so CSVs
+    # with header "CPU" or "MEM" line up with kebab-flavored YAML keys.
+    match = next((c for c in value_cols if c.lower() == value_col.lower()), None)
+    if match is None:
+        return df  # let downstream prepare decide (it may want all columns)
+    ts_col = next((c for c in df.columns if c.lower() in _TIMESTAMP_COLS), None)
+    keep = [ts_col, match] if ts_col else [match]
+    df = df[keep]
+    if match != value_col:
+        df = df.rename(columns={match: value_col})
+    return df

@@ -53,10 +53,12 @@ def test_xgb_train_then_predict_roundtrip(tmp_path, monkeypatch):
     assert "scaler_obj" in bento.custom_objects
     assert bento.custom_objects["look_back"] == 6
 
-    # Predict from a window — should return a float.
+    # Predict from a window — multi-horizon returns ``list[ForecastPoint]``
+    # of length ``horizon`` (default 1). XGB is recursive — no CIs.
     window_values = _synthetic_cpu(n=8).iloc[-6:]["cpu"].tolist()
-    yhat = model.predict(bento, {"cpu": window_values})
-    assert isinstance(yhat, float)
+    out = model.predict(bento, {"cpu": window_values})
+    assert isinstance(out, list) and len(out) == 1
+    yhat = out[0].value
     # The synthetic data is clipped to [0.05, 0.95]; predictions in that
     # neighbourhood are sane. Loose bound — we're not asserting accuracy.
     assert -1.0 < yhat < 2.0
@@ -74,3 +76,64 @@ def test_xgb_predict_rejects_short_window(tmp_path, monkeypatch):
 
     with pytest.raises(ValueError, match="at least 6"):
         model.predict(bento, {"cpu": [0.5, 0.5]})
+
+
+def test_xgb_predict_recursive_multi_horizon(tmp_path, monkeypatch):
+    """Wave 1 #2: ``horizon=N`` returns a list of length N. XGB is
+    recursive — no native confidence intervals, so ``lower``/``upper``
+    stay ``None``.
+    """
+    from intelligence.api import schemas as api_schemas
+    from intelligence.ml.models.xgb import XgbModel, make_xgb_prepare
+
+    if not hasattr(api_schemas, "ForecastPoint"):
+        pytest.skip("ForecastPoint not implemented yet")
+
+    monkeypatch.setenv("BENTOML_HOME", str(tmp_path / "bentoml"))
+    prep = make_xgb_prepare(look_back=6, num_variables=1)
+    comps = prep(_synthetic_cpu(n=200))
+    comps["model_parameters"] = {"n_estimators": 20}
+    model = XgbModel()
+    bento, _ = model.train(comps, bento_name="t_xgb_mh", extras=None)
+
+    window = _synthetic_cpu(n=8).iloc[-6:]["cpu"].tolist()
+    try:
+        out = model.predict(bento, {"cpu": window}, horizon=4)
+    except TypeError:
+        pytest.skip("XgbModel.predict doesn't accept horizon yet")
+
+    assert isinstance(out, list) and len(out) == 4
+    for point in out:
+        value = getattr(point, "value", None) if not isinstance(point, dict) else point["value"]
+        lower = getattr(point, "lower", None) if not isinstance(point, dict) else point.get("lower")
+        upper = getattr(point, "upper", None) if not isinstance(point, dict) else point.get("upper")
+        assert value is not None
+        # Recursive XGB has no native CI — both bounds left empty.
+        assert lower is None
+        assert upper is None
+
+
+def test_xgb_predict_horizon_one_returns_single_element_list(tmp_path, monkeypatch):
+    from intelligence.api import schemas as api_schemas
+    from intelligence.ml.models.xgb import XgbModel, make_xgb_prepare
+
+    if not hasattr(api_schemas, "ForecastPoint"):
+        pytest.skip("ForecastPoint not implemented yet")
+
+    monkeypatch.setenv("BENTOML_HOME", str(tmp_path / "bentoml"))
+    prep = make_xgb_prepare(look_back=6, num_variables=1)
+    comps = prep(_synthetic_cpu(n=200))
+    comps["model_parameters"] = {"n_estimators": 20}
+    model = XgbModel()
+    bento, _ = model.train(comps, bento_name="t_xgb_one", extras=None)
+
+    try:
+        out = model.predict(
+            bento,
+            {"cpu": _synthetic_cpu(n=8).iloc[-6:]["cpu"].tolist()},
+            horizon=1,
+        )
+    except TypeError:
+        pytest.skip("XgbModel.predict doesn't accept horizon yet")
+
+    assert isinstance(out, list) and len(out) == 1

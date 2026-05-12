@@ -97,15 +97,28 @@ def test_drift_predict_on_shifted_chunk_reports_drift(tmp_path, monkeypatch):
     assert resp.prediction["drift_detected"] is True
 
 
-def test_drift_task_is_registered_via_factory(tmp_path, monkeypatch):
-    """The drift factory should compose with ``build_loader_for_task`` and
-    register under a name that ties it to its forecaster.
+def test_drift_task_is_registered_via_builder(tmp_path, monkeypatch):
+    """A drift task block under ``cfg.tasks`` registers via the drift
+    builder and carries its forecaster reference.
     """
-    from intelligence.config.settings import IntelligenceConfig
+    from intelligence.config.settings import (
+        ArimaTaskConfig,
+        DriftTaskConfig,
+        IntelligenceConfig,
+    )
     from intelligence.tasks import build_registry_from_config
 
     monkeypatch.setenv("BENTOML_HOME", str(tmp_path / "bentoml"))
-    cfg = IntelligenceConfig(enabled_tasks=["cpu_forecast_arima_drift"])
+    cfg = IntelligenceConfig(
+        tasks={
+            "cpu_forecast_arima": ArimaTaskConfig(kind="arima", feature="cpu"),
+            "cpu_forecast_arima_drift": DriftTaskConfig(
+                kind="drift",
+                feature="cpu",
+                forecaster="cpu_forecast_arima",
+            ),
+        },
+    )
     reg = build_registry_from_config(cfg)
     task = reg.get("cpu_forecast_arima_drift")
     assert getattr(task, "forecaster_task_name", None) == "cpu_forecast_arima"

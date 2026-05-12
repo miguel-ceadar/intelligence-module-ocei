@@ -4,6 +4,11 @@ Wraps ``ModelTrainer.train_arima`` for the ``Model`` contract. The
 Bento's ``custom_objects`` carry the fitted scaler, the historical
 training series, and per-task metrics so ``predict`` can refit
 against the stored prior plus the new observation.
+
+Multi-horizon forecasts come straight from statsmodels'
+``get_forecast(steps=N).summary_frame()``, which also exposes the 95 %
+confidence band — populated into each ``ForecastPoint.lower`` /
+``upper``.
 """
 
 from __future__ import annotations
@@ -12,6 +17,8 @@ import logging
 from typing import Any
 
 import numpy as np
+
+from intelligence.api.schemas import ForecastPoint
 
 logger = logging.getLogger(__name__)
 
@@ -63,7 +70,12 @@ class ArimaModel:
         )
         return bento, _coerce_jsonable(metrics)
 
-    def predict(self, bento_model: Any, input_series: dict[str, list[float]]) -> Any:
+    def predict(
+        self,
+        bento_model: Any,
+        input_series: dict[str, list[float]],
+        horizon: int = 1,
+    ) -> list[ForecastPoint]:
         # ARIMA is univariate — pick the first input series.
         if not input_series:
             raise ValueError("input_series is empty")
@@ -83,9 +95,25 @@ class ArimaModel:
         last_scaled = float(scaler.transform(np.array([[values[-1]]]))[0][0])
         history.append(last_scaled)
         fit = ARIMA(history, order=order).fit()
-        yhat_scaled = float(fit.forecast()[0])
-        yhat = float(scaler.inverse_transform(np.array([[yhat_scaled]]))[0][0])
-        return round(yhat, 4)
+
+        # 95 % CI is what statsmodels returns by default (alpha=0.05).
+        frame = fit.get_forecast(steps=horizon).summary_frame(alpha=0.05)
+        mean_raw = scaler.inverse_transform(frame["mean"].to_numpy().reshape(-1, 1)).flatten()
+        lower_raw = scaler.inverse_transform(
+            frame["mean_ci_lower"].to_numpy().reshape(-1, 1)
+        ).flatten()
+        upper_raw = scaler.inverse_transform(
+            frame["mean_ci_upper"].to_numpy().reshape(-1, 1)
+        ).flatten()
+
+        return [
+            ForecastPoint(
+                value=round(float(m), 4),
+                lower=round(float(lo), 4),
+                upper=round(float(hi), 4),
+            )
+            for m, lo, hi in zip(mean_raw, lower_raw, upper_raw, strict=True)
+        ]
 
 
 def _coerce_jsonable(metrics: dict) -> dict:

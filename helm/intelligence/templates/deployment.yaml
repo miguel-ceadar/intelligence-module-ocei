@@ -1,0 +1,93 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "intelligence.fullname" . }}
+  labels:
+    {{- include "intelligence.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.replicaCount }}
+  selector:
+    matchLabels:
+      {{- include "intelligence.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "intelligence.selectorLabels" . | nindent 8 }}
+      annotations:
+        # Force a rolling restart when either the rendered config or the
+        # secret values change — pods otherwise keep stale data.
+        checksum/config: {{ include (print $.Template.BasePath "/configmap.yaml") . | sha256sum }}
+        {{- if or .Values.existingSecretName .Values.secretEnv }}
+        checksum/secret: {{ include (print $.Template.BasePath "/secret.yaml") . | sha256sum }}
+        {{- end }}
+    spec:
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      containers:
+        - name: intelligence
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          securityContext:
+            {{- toYaml .Values.securityContext | nindent 12 }}
+          ports:
+            - name: http
+              containerPort: 3000
+              protocol: TCP
+          env:
+            - name: INTELLIGENCE_CONFIG
+              value: /etc/intelligence/config.yaml
+            {{- range $k, $v := .Values.extraEnv }}
+            - name: {{ $k }}
+              value: {{ $v | quote }}
+            {{- end }}
+            {{- range $k, $_ := .Values.secretEnv }}
+            - name: {{ $k }}
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "intelligence.secretName" $ }}
+                  key: {{ $k }}
+            {{- end }}
+            {{- if .Values.existingSecretName }}
+            {{- /* For an existingSecret the chart can't know the keys; pilots
+                   must declare each they want to consume via extraEnv → valueFrom
+                   in a custom values.yaml. */}}
+            {{- end }}
+          volumeMounts:
+            - name: config
+              mountPath: /etc/intelligence
+              readOnly: true
+            {{- if .Values.persistence.enabled }}
+            - name: bentoml-store
+              mountPath: /var/lib/bentoml
+            {{- end }}
+          livenessProbe:
+            {{- toYaml .Values.livenessProbe | nindent 12 }}
+          readinessProbe:
+            {{- toYaml .Values.readinessProbe | nindent 12 }}
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+      volumes:
+        - name: config
+          configMap:
+            name: {{ include "intelligence.fullname" . }}-config
+        {{- if .Values.persistence.enabled }}
+        - name: bentoml-store
+          persistentVolumeClaim:
+            claimName: {{ include "intelligence.fullname" . }}-bentoml
+        {{- end }}
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
