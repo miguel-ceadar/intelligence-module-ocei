@@ -14,7 +14,7 @@ authors = [
 ]
 
 dependencies = [
-  "bentoml==1.1.11",
+  "bentoml>=1.4.39,<2.0",  # bumped from ==1.1.11 to clear 9 CVE findings; the legacy Service constructor moved to bentoml.legacy in 1.2
   "pandas>=1.5.3",
   "numpy>=1.24.4,<2",
   "scikit-learn>=1.6.1",
@@ -62,7 +62,10 @@ dev = [
 # nannyml pins kaleido==0.2.1.post1, which has no ARM-Mac wheel.
 # Forcing a newer kaleido that does until nannyml moves behind an
 # optional [drift] extra.
-override-dependencies = ["kaleido>=1.0"]
+#
+# lightgbm pulled in transitively by nannyml -> flaml[automl]. 4.5.0
+# has PYSEC-2024-231; 4.6.0 fixes it.
+override-dependencies = ["kaleido>=1.0", "lightgbm>=4.6.0"]
 
 # Pull torch from the CPU-only PyTorch index. Without this, the default
 # resolution drags in the NVIDIA CUDA stack (nvidia-cublas, cudnn, triton,

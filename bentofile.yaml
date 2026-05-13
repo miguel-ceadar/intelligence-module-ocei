@@ -21,7 +21,7 @@ exclude:
 
 python:
   packages:
-    - "bentoml==1.1.11"
+    - "bentoml>=1.4.39,<2.0"
     - "pandas>=1.5.3"
     - "numpy>=1.24.4,<2"
     - "scikit-learn>=1.6.1"

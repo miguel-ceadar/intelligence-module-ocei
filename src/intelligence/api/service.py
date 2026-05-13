@@ -398,9 +398,12 @@ def predict(task_name: str, req: PredictRequest):
     return result.model_dump()
 
 
-# Expose the FastAPI app as a ``bentoml.Service`` so ``bentoml serve``
-# works alongside ``uvicorn intelligence.api.service:app``.
-import bentoml  # noqa: E402
+# Expose the FastAPI app as a BentoML Service so ``bentoml serve``
+# works alongside ``uvicorn intelligence.api.service:app``. The class-
+# based Service constructor moved to ``bentoml.legacy`` in 1.2 when
+# the decorator-based @bentoml.service became the recommended pattern;
+# the legacy form is preserved through 1.4.x for backward compat.
+from bentoml.legacy import Service  # noqa: E402
 
-svc = bentoml.Service(name="intelligence")
+svc = Service(name="intelligence")
 svc.mount_asgi_app(app)
