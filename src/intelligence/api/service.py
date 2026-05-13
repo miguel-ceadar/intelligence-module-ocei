@@ -220,6 +220,55 @@ def list_task_versions(task_name: str) -> dict:
     }
 
 
+@app.delete("/tasks/{task_name}/versions/{version}")
+def delete_task_version(task_name: str, version: str) -> dict:
+    """Remove a specific stored version of this task from the local
+    BentoML store. Reclaims PVC space — the store is otherwise
+    append-only and grows with every train.
+
+    Guards:
+
+    - ``version="latest"`` is refused: pass a concrete version string
+      so an operator can't accidentally drop the most recent.
+    - The currently ``pinned_version`` is refused: deleting it would
+      immediately break ``/predict`` for that task.
+    """
+    import bentoml
+    from bentoml.exceptions import NotFound
+
+    if task_name not in registry:
+        raise HTTPException(status_code=404, detail=f"unknown task: {task_name}")
+    if version == "latest":
+        raise HTTPException(
+            status_code=400,
+            detail="refuse to delete 'latest' — pass a concrete version string",
+        )
+    task = registry.get(task_name)
+    if getattr(task, "pinned_version", None) == version:
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                f"version {version!r} is pinned for task {task_name!r}; "
+                f"unpin it in config or delete a different version"
+            ),
+        )
+    bento_name = getattr(task, "bento_name", task_name)
+    tag = f"{bento_name}:{version}"
+    try:
+        bentoml.models.delete(tag)
+    except NotFound as e:
+        raise HTTPException(
+            status_code=404,
+            detail=f"version {version!r} not found for task {task_name!r}",
+        ) from e
+    # Drop cached entries that may have pointed at the deleted tag.
+    cached = getattr(task, "_cached_artifacts", None)
+    if isinstance(cached, dict):
+        cached.pop(version, None)
+        cached.pop("latest", None)
+    return {"task": task_name, "deleted": version}
+
+
 @app.get("/models")
 def list_models() -> dict:
     """List Bento models in the local store.
@@ -279,6 +328,9 @@ def sync_model(req: ModelSyncRequest):
     the environment. Pulled models still need to match the task's
     ``input_spec`` to be served (see ``BaseTask._verify_artifact``).
     """
+    import requests
+    from huggingface_hub.errors import HfHubHTTPError
+
     cfg = config.intelligence.model_repo
     if not cfg.hf_enabled:
         raise HTTPException(
@@ -302,6 +354,25 @@ def sync_model(req: ModelSyncRequest):
         raise HTTPException(status_code=404, detail=str(e)) from e
     except (ValueError, TypeError) as e:
         raise HTTPException(status_code=422, detail=str(e)) from e
+    except HfHubHTTPError as e:
+        # Bad token (401), repo not found (404), gated repo (403), etc.
+        # Forward the upstream status so the client doesn't see an opaque 500.
+        upstream_status = getattr(e.response, "status_code", None)
+        if upstream_status in (401, 403, 404):
+            raise HTTPException(
+                status_code=upstream_status,
+                detail=f"upstream HF error: {type(e).__name__}: {e}",
+            ) from e
+        raise HTTPException(
+            status_code=502,
+            detail=f"upstream HF error: {type(e).__name__}: {e}",
+        ) from e
+    except requests.RequestException as e:
+        # Connection refused / timeout / DNS — Hub unreachable.
+        raise HTTPException(
+            status_code=502,
+            detail=f"upstream HF transport error: {type(e).__name__}: {e}",
+        ) from e
     return ModelSyncResponse(action=req.action, model_tag=tag, repo_id=repo_id).model_dump()
 
 

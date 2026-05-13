@@ -82,3 +82,70 @@ def test_sync_endpoint_401_when_token_missing(monkeypatch, client):
     )
     assert resp.status_code == 401
     assert "HF_TOKEN" in resp.json()["detail"]
+
+
+def _make_hf_error(status_code: int, message: str):
+    """Build an HfHubHTTPError that surfaces the right ``response.status_code``.
+
+    The real exception is constructed by the SDK with a requests Response;
+    we mimic that shape with a stub so the handler's status-code-based
+    branching can be exercised without making a network call.
+    """
+    from huggingface_hub.errors import HfHubHTTPError
+
+    class _StubResponse:
+        def __init__(self, code: int) -> None:
+            self.status_code = code
+            self.headers: dict[str, str] = {}
+            self.request = None
+
+    return HfHubHTTPError(message, response=_StubResponse(status_code))  # type: ignore[arg-type]
+
+
+@pytest.mark.parametrize(
+    "upstream_status,expected_status",
+    [(401, 401), (403, 403), (404, 404), (500, 502), (503, 502)],
+)
+def test_sync_endpoint_translates_hf_http_errors(
+    upstream_status, expected_status, monkeypatch, client
+):
+    """Bad-token / repo-not-found / gated / 5xx from the HF API used to
+    propagate as opaque 500s. Translate them: auth-class statuses pass
+    through; everything else surfaces as 502 (upstream error)."""
+    from intelligence.api import service
+
+    monkeypatch.setattr(service.config.intelligence.model_repo, "hf_enabled", True)
+    monkeypatch.setenv("HF_TOKEN", "fake")
+
+    err = _make_hf_error(upstream_status, "upstream said no")
+    with mock.patch("intelligence.api.service.pull_from_hf", side_effect=err):
+        resp = client.post(
+            "/models/sync",
+            json={"action": "pull", "model_tag": "x:v1", "repo_id": "CeADAR/bentos"},
+        )
+
+    assert resp.status_code == expected_status, resp.text
+    assert "upstream HF" in resp.json()["detail"]
+
+
+def test_sync_endpoint_translates_transport_errors(monkeypatch, client):
+    """Connection refused / timeout / DNS failure from inside the HF SDK
+    must surface as 502 with a useful message, not an opaque 500."""
+    import requests
+
+    from intelligence.api import service
+
+    monkeypatch.setattr(service.config.intelligence.model_repo, "hf_enabled", True)
+    monkeypatch.setenv("HF_TOKEN", "fake")
+
+    with mock.patch(
+        "intelligence.api.service.pull_from_hf",
+        side_effect=requests.ConnectionError("connection refused"),
+    ):
+        resp = client.post(
+            "/models/sync",
+            json={"action": "pull", "model_tag": "x:v1", "repo_id": "CeADAR/bentos"},
+        )
+
+    assert resp.status_code == 502
+    assert "transport error" in resp.json()["detail"]
