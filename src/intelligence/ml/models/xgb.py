@@ -59,6 +59,7 @@ class XgbModel:
             "scaler_obj": components_with_params["scaler_obj"],  # y-scaler
             "scaler_X": components_with_params["scaler_X"],
             "look_back": components_with_params["look_back"],
+            "num_variables": components_with_params.get("num_variables", 1),
             "model_metrics": metrics_jsonable,
             "test_sample_size": len(components_with_params["X_test"]),
         }
@@ -91,6 +92,7 @@ class XgbModel:
             "xgb_meta.json",
             {
                 "look_back": int(artifacts["look_back"]),
+                "num_variables": int(artifacts.get("num_variables", 1)),
                 "test_sample_size": int(artifacts.get("test_sample_size", 0)),
             },
         )
@@ -135,6 +137,7 @@ class XgbModel:
             "scaler_obj": load_sklearn_scaler(src, "scaler_y"),
             "scaler_X": load_sklearn_scaler(src, "scaler_x"),
             "look_back": int(meta["look_back"]),
+            "num_variables": int(meta.get("num_variables", 1)),
             "model_metrics": load_json(src, "metrics.json"),
             "test_sample_size": int(meta.get("test_sample_size", 0)),
         }
@@ -148,36 +151,68 @@ class XgbModel:
         input_series: dict[str, list[float]],
         horizon: int = 1,
     ) -> list[ForecastPoint]:
-        """Recursive multi-horizon: predict t+1, slide it into the
-        window, predict t+2, …, ``horizon`` times. No native confidence
-        intervals — ``lower``/``upper`` stay ``None``.
+        """Recursive multi-horizon: predict target t+1, slide it into
+        the window, predict t+2, …, ``horizon`` times. Covariates are
+        held at their last observed value across the horizon (we don't
+        have future ground truth). No native confidence intervals —
+        ``lower``/``upper`` stay ``None``.
         """
         if not input_series:
             raise ValueError("input_series is empty")
-        # Univariate — pick the first series.
-        _key, values = next(iter(input_series.items()))
+
         look_back = int(artifacts["look_back"])
-        if len(values) < look_back:
-            raise ValueError(f"need at least {look_back} observations, got {len(values)}")
+        num_variables = int(artifacts.get("num_variables", 1))
+
+        # Canonical feature order comes from the saved InputSpec when
+        # present (predict-time validation has already aligned the
+        # request to it). Fall back to ``input_series`` insertion order
+        # for legacy artifacts that pre-date input_spec.
+        spec = artifacts.get("input_spec")
+        if spec is not None:
+            series_keys = list(spec.feature_names)
+        else:
+            series_keys = list(input_series.keys())[:num_variables]
+        if len(series_keys) < num_variables:
+            raise ValueError(f"need {num_variables} input series, got {len(series_keys)}")
+
+        # Stack into a (look_back, num_variables) window. The supervised
+        # training structure orders columns by (lag, var) — same shape
+        # we want here so a row-major flatten produces the model's
+        # expected input vector.
+        window_2d = np.column_stack(
+            [np.asarray(input_series[k], dtype=float)[-look_back:] for k in series_keys]
+        )
+        if window_2d.shape[0] < look_back:
+            raise ValueError(
+                f"need at least {look_back} observations per series, got {window_2d.shape[0]}"
+            )
 
         scaler_x = artifacts["scaler_X"]
         scaler_y = artifacts["scaler_obj"]
         cols = getattr(scaler_x, "feature_names_in_", None)
         regressor = artifacts["regressor"]
 
-        window = [float(v) for v in values[-look_back:]]
+        # Hold covariates frozen across the recursive horizon — the
+        # model has no notion of future covariate values, and a generic
+        # forecasting lib can't assume the caller does either.
+        last_covariates = window_2d[-1, 1:].copy() if num_variables > 1 else None
+
         forecasts: list[float] = []
         for _ in range(horizon):
-            x = np.array(window, dtype=float).reshape(1, look_back)
+            x_flat = window_2d.reshape(1, -1)
             if cols is not None:
-                x_scaled = scaler_x.transform(pd.DataFrame(x, columns=cols))
+                x_scaled = scaler_x.transform(pd.DataFrame(x_flat, columns=cols))
             else:
-                x_scaled = scaler_x.transform(x)
+                x_scaled = scaler_x.transform(x_flat)
             y_scaled = regressor.predict(x_scaled)
             y_raw = float(scaler_y.inverse_transform(np.asarray(y_scaled).reshape(-1, 1))[0, 0])
             forecasts.append(y_raw)
-            # Slide the window forward: drop oldest, append fresh prediction.
-            window = [*window[1:], y_raw]
+            # Slide: drop oldest row, append [ŷ, *frozen_covariates].
+            if last_covariates is None:
+                new_row = np.array([y_raw])
+            else:
+                new_row = np.concatenate(([y_raw], last_covariates))
+            window_2d = np.vstack([window_2d[1:], new_row])
 
         return [ForecastPoint(value=round(v, 4)) for v in forecasts]
 
@@ -230,6 +265,7 @@ def make_xgb_prepare(
             "scaler_obj": scaler_y,  # y-scaler (used by trainer for inverse_transform)
             "scaler_X": scaler_x,  # x-scaler (saved in Bento for predict)
             "look_back": look_back,
+            "num_variables": num_variables,
         }
 
     return prepare

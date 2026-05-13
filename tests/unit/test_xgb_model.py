@@ -49,6 +49,7 @@ def test_xgb_predict_rejects_short_window():
         "scaler_obj": StandardScaler().fit(np.array([[0.0], [1.0]])),
         "scaler_X": StandardScaler().fit(np.zeros((2, 6))),
         "look_back": 6,
+        "num_variables": 1,
     }
     with pytest.raises(ValueError, match="at least 6"):
         XgbModel().predict(artifacts, {"cpu": [0.5, 0.5]})
@@ -211,3 +212,40 @@ def test_xgb_files_map_declares_only_safe_extensions(xgb_artifacts_fit, tmp_path
         assert Path(fname).suffix.lower() in ALLOWED_EXTENSIONS, (
             f"role {role!r} declares {fname!r} with disallowed extension"
         )
+
+
+def _synthetic_multivariate(n: int = 200, seed: int = 19) -> pd.DataFrame:
+    """CPU drives memory with a lag; load is independent noise. Target =
+    cpu (first column)."""
+    rng = np.random.default_rng(seed)
+    cpu = (np.cumsum(rng.standard_normal(n) * 0.02) + 0.5).clip(0.05, 0.95)
+    mem = np.roll(cpu, 1) + rng.standard_normal(n) * 0.01
+    load = rng.standard_normal(n) * 0.1 + 0.3
+    return pd.DataFrame({"timestamp": np.arange(n), "cpu": cpu, "mem": mem, "load": load})
+
+
+def test_xgb_multivariate_train_and_predict_roundtrip():
+    """Train XGB with covariates; predict the target. Covariates flow
+    through the lag-feature matrix; recursive horizon freezes them."""
+    from intelligence.ml.models.xgb import XgbModel, make_xgb_prepare
+
+    prep = make_xgb_prepare(look_back=6, num_variables=3)
+    comps = prep(_synthetic_multivariate(n=200))
+    comps["model_parameters"] = {"n_estimators": 20}
+    model = XgbModel()
+    artifacts, _ = model.fit(comps)
+    assert artifacts["num_variables"] == 3
+
+    fresh = _synthetic_multivariate(n=8, seed=101)
+    out = model.predict(
+        artifacts,
+        {
+            "cpu": fresh.iloc[-6:]["cpu"].tolist(),
+            "mem": fresh.iloc[-6:]["mem"].tolist(),
+            "load": fresh.iloc[-6:]["load"].tolist(),
+        },
+        horizon=3,
+    )
+    assert len(out) == 3
+    for point in out:
+        assert point.value is not None

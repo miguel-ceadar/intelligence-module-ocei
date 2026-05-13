@@ -73,11 +73,13 @@ def test_task_registry_built_from_task_blocks():
     build = getattr(tasks, "build_registry_from_config", None)
     if build is None:
         pytest.skip("intelligence.tasks.build_registry_from_config not implemented yet")
-    from intelligence.config.settings import ArimaTaskConfig, IntelligenceConfig
+    from intelligence.config.settings import ArimaTaskConfig, FeatureSpec, IntelligenceConfig
 
     cfg = IntelligenceConfig(
         tasks={
-            "cpu_forecast_arima": ArimaTaskConfig(kind="arima", feature="cpu"),
+            "cpu_forecast_arima": ArimaTaskConfig(
+                kind="arima", features=[FeatureSpec(name="cpu")]
+            ),
         },
     )
     reg = build(cfg)

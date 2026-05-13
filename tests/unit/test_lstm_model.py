@@ -167,8 +167,12 @@ def test_lstm_save_artifacts_writes_safetensors_no_pickle(lstm_artifacts_fit, tm
     # arch.json carries the constructor arguments needed to rebuild
     # the nn.Module before loading the state_dict into it.
     assert (tmp_path / "arch.json").exists()
-    assert (tmp_path / "scaler.json").exists()
-    assert (tmp_path / "scaler.npz").exists()
+    # Two scalers: target (scaler_y) for output inverse, input (scaler_x)
+    # for multivariate window transform. Mirrors XGB.
+    assert (tmp_path / "scaler_y.json").exists()
+    assert (tmp_path / "scaler_y.npz").exists()
+    assert (tmp_path / "scaler_x.json").exists()
+    assert (tmp_path / "scaler_x.npz").exists()
     assert (tmp_path / "metrics.json").exists()
 
     assert not list(tmp_path.glob("*.pkl"))
@@ -241,3 +245,68 @@ def test_lstm_files_map_declares_only_safe_extensions(lstm_artifacts_fit, tmp_pa
         assert Path(fname).suffix.lower() in ALLOWED_EXTENSIONS, (
             f"role {role!r} declares {fname!r} with disallowed extension"
         )
+
+
+def _synthetic_multivariate(n: int = 300, seed: int = 17) -> pd.DataFrame:
+    """Two correlated series — cpu drives memory with a one-step lag —
+    plus a noisy unrelated covariate. Forecasting cpu (target) should
+    work whether or not we include the covariates."""
+    rng = np.random.default_rng(seed)
+    cpu = (np.cumsum(rng.standard_normal(n) * 0.02) + 0.5).clip(0.05, 0.95)
+    mem = np.roll(cpu, 1) + rng.standard_normal(n) * 0.01
+    load = rng.standard_normal(n) * 0.1 + 0.3
+    return pd.DataFrame({"timestamp": np.arange(n), "cpu": cpu, "mem": mem, "load": load})
+
+
+@pytest.mark.slow
+def test_lstm_prepare_multivariate_emits_target_only_y():
+    """Multivariate input, single-target output. y shape is
+    ``(samples, horizon)`` regardless of how many input vars."""
+    pytest.importorskip("torch")
+    from intelligence.ml.models.lstm import make_lstm_prepare
+
+    prep = make_lstm_prepare(look_back=6, num_variables=3, batch_size=16, horizon=2)
+    comps = prep(_synthetic_multivariate())
+
+    assert comps["X_train"].shape[2] == 3  # num_variables in input
+    assert comps["y_train"].shape[1] == 2  # horizon only — target alone
+    # Dual scaler: scaler_obj fits target only; scaler_X fits all 3 inputs.
+    assert comps["scaler_obj"].data_min_.shape == (1,)
+    assert comps["scaler_X"].data_min_.shape == (3,)
+
+
+@pytest.mark.slow
+def test_lstm_multivariate_train_and_predict_roundtrip():
+    """Train an LSTM on three inputs, predict the target. The covariates
+    flow through scaler_X; only the target comes back from predict."""
+    pytest.importorskip("torch")
+    from intelligence.ml.models.lstm import LstmModel, make_lstm_prepare
+
+    horizon = 2
+    prep = make_lstm_prepare(look_back=6, num_variables=3, batch_size=16, horizon=horizon)
+    comps = prep(_synthetic_multivariate(n=300))
+    comps["model_parameters"] = {
+        "input_size": 3,  # num_variables
+        "output_size": horizon,
+        "hidden_size": 4,
+        "num_epochs": 2,
+    }
+
+    model = LstmModel()
+    artifacts, _ = model.fit(comps)
+    assert artifacts["num_variables"] == 3
+    assert artifacts["output_size"] == horizon
+
+    fresh = _synthetic_multivariate(n=8, seed=42)
+    out = model.predict(
+        artifacts,
+        {
+            "cpu": fresh.iloc[-6:]["cpu"].tolist(),
+            "mem": fresh.iloc[-6:]["mem"].tolist(),
+            "load": fresh.iloc[-6:]["load"].tolist(),
+        },
+        horizon=horizon,
+    )
+    assert len(out) == horizon
+    for point in out:
+        assert point.value is not None

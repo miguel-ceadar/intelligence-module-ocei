@@ -67,7 +67,7 @@ curl -X POST http://localhost:3000/tasks/energy_forecast_arima/predict \
   -d '{"input_series": {"energy": [180.4]}}'
 ```
 
-The `feature: energy` declaration in `config.yaml` is a logical
+The `name: energy` declaration in each feature is a logical
 identifier — it names the column that `/predict` accepts, not a
 specific exporter. As long as the value you pass in `input_series.energy`
 is in the same units as your training data (watts, in the recipes
@@ -77,9 +77,9 @@ above), the model is unit-agnostic.
 
 Comparing `config.yaml`:
 
-- `feature: cpu` → `feature: energy`
+- The feature's `name: cpu` → `name: energy`
 - Task names renamed to `energy_forecast_*`
-- `query:` swapped for an energy PromQL expression
-- `value_range` widened from `[0.0, 1.0]` (a CPU fraction) to
-  `[0.0, 500.0]` (a node-class watts envelope)
+- The feature's `query:` swapped for an energy PromQL expression
+- The feature's `value_range` widened from `[0.0, 1.0]` (a CPU
+  fraction) to `[0.0, 500.0]` (a node-class watts envelope)
 - Drift task's `forecaster:` points at `energy_forecast_arima`

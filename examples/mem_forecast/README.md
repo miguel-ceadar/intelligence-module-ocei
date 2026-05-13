@@ -51,7 +51,7 @@ curl -X POST http://localhost:3000/tasks/mem_forecast_arima/predict \
 
 The bundled `node_3_utilisation_sample_dataset.csv` carries CPU+MEM
 side-by-side. The loader picks the `MEM` column automatically when
-`feature: mem` is set:
+the target feature is `mem`:
 
 ```bash
 curl -X POST http://localhost:3000/tasks/mem_forecast_arima/train \
@@ -63,9 +63,9 @@ curl -X POST http://localhost:3000/tasks/mem_forecast_arima/train \
 
 Comparing `config.yaml`:
 
-- `feature: cpu` → `feature: mem`
+- The feature's `name: cpu` → `name: mem`
 - Task names renamed to `mem_forecast_*`
-- `query:` swapped for a memory PromQL expression
+- The feature's `query:` swapped for a memory PromQL expression
 - Drift task's `forecaster:` points at `mem_forecast_arima`
 
 Nothing else. No new Python, no new builders, no new model classes.

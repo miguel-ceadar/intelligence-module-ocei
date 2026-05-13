@@ -27,16 +27,15 @@ def build_drift_task(
         data_loader=build_loader_for_task(
             intelligence_cfg,
             name,
-            value_col=task_cfg.feature,
+            value_cols=[f.name for f in task_cfg.features],
             prepare=make_drift_prepare(value_col=None),
-            query=task_cfg.query,
+            queries=[f.query for f in task_cfg.features],
         ),
         chunk_size=task_cfg.chunk_size,
         metric=task_cfg.metric,
         input_spec=build_input_spec(
-            feature=task_cfg.feature,
+            features=task_cfg.features,
             steps_back=task_cfg.chunk_size,
-            value_range=task_cfg.value_range,
         ),
         pinned_version=task_cfg.pinned_version,
     )

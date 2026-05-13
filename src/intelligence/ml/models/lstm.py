@@ -1,11 +1,19 @@
 """PyTorch LSTM implementing the ``Model`` protocol.
 
+Single-target multivariate forecaster: the network consumes
+``num_variables`` input series and predicts only the **target** (first
+feature) across ``horizon`` future steps.
+
 Expects components produced by ``make_lstm_prepare``:
   - ``X_train`` / ``X_test``: ``(samples, look_back, num_variables)`` tensors.
-  - ``y_train`` / ``y_test``: ``(samples, horizon * num_variables)`` tensors.
+  - ``y_train`` / ``y_test``: ``(samples, horizon)`` tensors — target only.
   - ``train_dataset`` / ``test_dataset``: ``TimeSeriesDataset`` instances.
   - ``batch_size``.
-  - ``scaler_obj``: a single MinMaxScaler fit on the raw multivariate data.
+  - ``scaler_X``: MinMaxScaler fit on the multivariate input data
+    (one column per feature). Used to scale predict-time input windows.
+  - ``scaler_obj``: MinMaxScaler fit on the target column only. Used
+    to inverse-transform network output. Mirrors XGB's two-scaler
+    pattern (y-scaler == ``scaler_obj``, x-scaler == ``scaler_X``).
   - ``model_parameters``: ``input_size``, ``output_size``, ``hidden_size``,
     ``num_epochs``. Optional: ``distill``. ``output_size`` is the trained
     horizon; predict refuses requests above it.
@@ -59,7 +67,8 @@ class LstmModel:
 
         artifacts = {
             "network": network,
-            "scaler_obj": components_with_params["scaler_obj"],
+            "scaler_obj": components_with_params["scaler_obj"],  # target scaler
+            "scaler_X": components_with_params["scaler_X"],  # input scaler (multivariate)
             "look_back": components_with_params["look_back"],
             "num_variables": components_with_params["num_variables"],
             "input_size": params["input_size"],
@@ -100,14 +109,17 @@ class LstmModel:
                 "num_variables": int(artifacts["num_variables"]),
             },
         )
-        save_sklearn_scaler(dest, "scaler", artifacts["scaler_obj"])
+        save_sklearn_scaler(dest, "scaler_y", artifacts["scaler_obj"])
+        save_sklearn_scaler(dest, "scaler_x", artifacts["scaler_X"])
         save_json(dest, "metrics.json", artifacts.get("model_metrics", {}))
 
         files: dict[str, str] = {
             "model": "lstm.safetensors",
             "arch": "arch.json",
-            "scaler_meta": "scaler.json",
-            "scaler_arrays": "scaler.npz",
+            "scaler_y_meta": "scaler_y.json",
+            "scaler_y_arrays": "scaler_y.npz",
+            "scaler_x_meta": "scaler_x.json",
+            "scaler_x_arrays": "scaler_x.npz",
             "metrics": "metrics.json",
         }
         spec = artifacts.get("input_spec")
@@ -140,7 +152,8 @@ class LstmModel:
 
         loaded: dict[str, Any] = {
             "network": network,
-            "scaler_obj": load_sklearn_scaler(src, "scaler"),
+            "scaler_obj": load_sklearn_scaler(src, "scaler_y"),  # target scaler
+            "scaler_X": load_sklearn_scaler(src, "scaler_x"),  # input scaler
             "look_back": int(arch["look_back"]),
             "num_variables": int(arch["num_variables"]),
             "input_size": int(arch["input_size"]),
@@ -172,7 +185,6 @@ class LstmModel:
 
         look_back = int(artifacts["look_back"])
         num_variables = int(artifacts["num_variables"])
-        scaler = artifacts["scaler_obj"]
         trained_horizon = int(artifacts.get("horizon", artifacts.get("output_size", 1)))
 
         if horizon > trained_horizon:
@@ -183,7 +195,13 @@ class LstmModel:
 
         # Stack the input series in declared order, take the last ``look_back``
         # observations across all variables → shape (look_back, num_variables).
-        series_keys = list(input_series.keys())[:num_variables]
+        # Spec validation (above) already guaranteed every expected feature
+        # is present and the window is long enough.
+        spec = artifacts.get("input_spec")
+        if spec is not None:
+            series_keys = list(spec.feature_names)
+        else:
+            series_keys = list(input_series.keys())[:num_variables]
         if len(series_keys) < num_variables:
             raise ValueError(f"need {num_variables} input series, got {len(series_keys)}")
         window = np.column_stack(
@@ -194,26 +212,22 @@ class LstmModel:
                 f"need at least {look_back} observations per series, got {window.shape[0]}"
             )
 
-        scaled = scaler.transform(window)  # (look_back, num_variables)
+        input_scaler = artifacts["scaler_X"]
+        target_scaler = artifacts["scaler_obj"]
+        scaled = input_scaler.transform(window)  # (look_back, num_variables)
         x = torch.from_numpy(scaled).float().unsqueeze(0)  # (1, look_back, num_variables)
 
         net = artifacts["network"]
         net.eval()
         with torch.no_grad():
-            y_scaled = net(x).cpu().numpy()  # (1, trained_horizon * num_variables)
+            y_scaled = net(x).cpu().numpy()  # (1, trained_horizon)
 
-        # The scaler was fit on (n, num_variables); inverse_transform expects
-        # that shape regardless of how many horizon steps we're decoding.
-        # Reshape (1, H * V) -> (H, V), inverse, then take the first `horizon` rows.
-        y_flat = y_scaled.reshape(trained_horizon, num_variables)
-        y_raw = scaler.inverse_transform(y_flat)  # (trained_horizon, num_variables)
-        y_raw = y_raw[:horizon]  # truncate to requested
+        # Target-only output: inverse-transform via the target scaler.
+        # Shape (1, H) → (H, 1) → inverse → flatten → truncate to requested horizon.
+        y_raw = target_scaler.inverse_transform(y_scaled.reshape(-1, 1)).reshape(-1)
+        y_raw = y_raw[:horizon]
 
-        if num_variables == 1:
-            return [ForecastPoint(value=round(float(v), 4)) for v in y_raw[:, 0]]
-        # Multivariate output is not yet supported; return the first
-        # variable so the shape contract is preserved.
-        return [ForecastPoint(value=round(float(row[0]), 4)) for row in y_raw]
+        return [ForecastPoint(value=round(float(v), 4)) for v in y_raw]
 
 
 def make_lstm_prepare(
@@ -225,10 +239,17 @@ def make_lstm_prepare(
     """Build a ``prepare`` callable that produces LSTM-shaped components
     (3-D X tensors + ``TimeSeriesDataset`` instances).
 
-    ``horizon`` controls the target window: the supervised structure
-    emits a ``(samples, horizon * num_variables)`` y-tensor so the
-    network can be trained for multi-step direct output. Pair with
-    ``model_parameters["output_size"] = horizon * num_variables``.
+    Multivariate: the first column is the target; remaining columns are
+    exogenous covariates. The supervised structure emits a
+    ``(samples, horizon)`` y-tensor — target only across the horizon —
+    paired with ``model_parameters["output_size"] = horizon``.
+
+    Two scalers are fit:
+      - ``scaler_X``: multivariate MinMax fit on all input columns,
+        applied to every input window at train and predict time.
+      - ``scaler_obj``: univariate MinMax fit on the target column,
+        used to inverse-transform network output. The dual-scaler
+        pattern matches XGB (``scaler_obj`` = y, ``scaler_X`` = x).
     """
 
     def prepare(df: pd.DataFrame) -> dict:
@@ -248,18 +269,42 @@ def make_lstm_prepare(
         split = int(len(data) * 0.8)
         train_df, test_df = data.iloc[:split], data.iloc[split:]
 
-        scaler = MinMaxScaler().fit(train_df)
-        scaled_train = scaler.transform(train_df)
-        scaled_test = scaler.transform(test_df)
+        scaler_X = MinMaxScaler().fit(train_df)
+        scaler_y = MinMaxScaler().fit(train_df.iloc[:, 0:1])  # target only
+        scaled_train = scaler_X.transform(train_df)
+        scaled_test = scaler_X.transform(test_df)
 
         sup_train = _ts_supervised_structure(scaled_train, n_in=look_back, n_out=horizon)
         sup_test = _ts_supervised_structure(scaled_test, n_in=look_back, n_out=horizon)
 
+        # Supervised columns are ordered (lag, var). The future section
+        # (last horizon * num_variables cols) interleaves var1, var2, …
+        # for each step; the target lives at offsets 0, V, 2V, …, so a
+        # ``[:, -y_width::num_variables]`` slice extracts it.
         y_width = horizon * num_variables
         x_train = sup_train[:, :-y_width].reshape(-1, look_back, num_variables)
-        y_train = sup_train[:, -y_width:]
         x_test = sup_test[:, :-y_width].reshape(-1, look_back, num_variables)
-        y_test = sup_test[:, -y_width:]
+
+        # Slice target columns out of the y section, then rescale them
+        # via the dedicated target scaler. The values are currently in
+        # scaler_X's column-0 space — MinMax is per-column so we
+        # inverse-transform via the input scaler's col-0 first, then
+        # re-fit through scaler_y. In practice the parameters are
+        # identical (target_min == scaler_X.data_min_[0]) but going
+        # through the explicit re-scale keeps the two scalers
+        # interchangeable from the model's point of view.
+        y_train_scaled_input = sup_train[:, -y_width::num_variables]  # (samples, horizon)
+        y_test_scaled_input = sup_test[:, -y_width::num_variables]
+
+        target_min = scaler_X.data_min_[0]
+        target_range = scaler_X.data_range_[0]
+        # Re-scale: undo input scaler col-0 → apply target scaler.
+        # target scaler == col-0 of input scaler, so this is identity in
+        # values; the indirection keeps the predict-time math honest.
+        y_train_raw = y_train_scaled_input * target_range + target_min
+        y_test_raw = y_test_scaled_input * target_range + target_min
+        y_train = scaler_y.transform(y_train_raw.reshape(-1, 1)).reshape(y_train_raw.shape)
+        y_test = scaler_y.transform(y_test_raw.reshape(-1, 1)).reshape(y_test_raw.shape)
 
         x_train_t = torch.from_numpy(x_train).float()
         y_train_t = torch.from_numpy(y_train).float()
@@ -274,7 +319,8 @@ def make_lstm_prepare(
             "train_dataset": TimeSeriesDataset(x_train_t, y_train_t),
             "test_dataset": TimeSeriesDataset(x_test_t, y_test_t),
             "batch_size": batch_size,
-            "scaler_obj": scaler,
+            "scaler_obj": scaler_y,  # target scaler — for inverse on network output
+            "scaler_X": scaler_X,  # input scaler — for transforming predict-time windows
             "look_back": look_back,
             "num_variables": num_variables,
             "horizon": horizon,

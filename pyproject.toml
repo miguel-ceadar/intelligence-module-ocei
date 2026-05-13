@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "icos-intelligence-ocei"
-version = "0.1.0"
+version = "0.2.7"
 description = "CeADAR fork of icos-project/intelligence-module, adapted for the O-CEI continuum: forecasting and drift detection against generic Prometheus telemetry"
 readme = "README.md"
 requires-python = ">=3.11,<3.13"

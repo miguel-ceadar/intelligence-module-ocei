@@ -52,10 +52,11 @@ config:
     tasks:
       cpu_forecast_arima:
         kind: arima
-        feature: cpu
-        value_range: [0.0, 1.0]
         steps_back: 1
-        query: 'avg(rate(node_cpu_seconds_total{mode!="idle"}[30s]))'
+        features:
+          - name: cpu
+            value_range: [0.0, 1.0]
+            query: 'avg(rate(node_cpu_seconds_total{mode!="idle"}[30s]))'
 
 persistence:
   enabled: true

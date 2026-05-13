@@ -23,9 +23,10 @@ def config_yaml(tmp_path: Path) -> Path:
           tasks:
             cpu_forecast_arima:
               kind: arima
-              feature: cpu
-              value_range: [0.0, 1.0]
               steps_back: 1
+              features:
+                - name: cpu
+                  value_range: [0.0, 1.0]
         """.strip()
     )
     return p
@@ -36,7 +37,7 @@ def test_config_loads_from_yaml(config_yaml: Path):
     assert "cpu_forecast_arima" in cfg.intelligence.tasks
     task = cfg.intelligence.tasks["cpu_forecast_arima"]
     assert task.kind == "arima"
-    assert task.feature == "cpu"
+    assert [f.name for f in task.features] == ["cpu"]
 
 
 def test_config_telemetry_default_is_static(config_yaml: Path):
@@ -53,7 +54,8 @@ def test_config_unknown_kind_raises(tmp_path: Path):
           tasks:
             mystery_task:
               kind: transformer
-              feature: cpu
+              features:
+                - name: cpu
         """.strip()
     )
     with pytest.raises(ValidationError):
@@ -69,8 +71,9 @@ def test_config_drift_with_unknown_forecaster_raises(tmp_path: Path):
           tasks:
             cpu_drift:
               kind: drift
-              feature: cpu
               forecaster: does_not_exist
+              features:
+                - name: cpu
         """.strip()
     )
     with pytest.raises(ValueError, match="forecaster"):
@@ -111,8 +114,9 @@ def test_config_loads_prometheus_block(tmp_path: Path):
           tasks:
             cpu_forecast_arima:
               kind: arima
-              feature: cpu
-              query: 'avg(rate(node_cpu_seconds_total{mode!="idle"}[30s]))'
+              features:
+                - name: cpu
+                  query: 'avg(rate(node_cpu_seconds_total{mode!="idle"}[30s]))'
         """.strip()
     )
     cfg = config.load_config(p)
@@ -121,8 +125,8 @@ def test_config_loads_prometheus_block(tmp_path: Path):
     assert telemetry.prometheus is not None
     assert telemetry.prometheus.endpoint == "http://prom.monitoring.svc:9090"
     assert telemetry.prometheus.token_env == "PROM_TOKEN"
-    # Per-task query lives on the task block, not in a central queries dict.
-    assert cfg.intelligence.tasks["cpu_forecast_arima"].query.startswith("avg(rate")
+    # Per-feature query lives on the feature spec, not in a central queries dict.
+    assert cfg.intelligence.tasks["cpu_forecast_arima"].features[0].query.startswith("avg(rate")
 
 
 def test_config_rejects_prometheus_source_without_block(tmp_path: Path):

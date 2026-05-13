@@ -161,18 +161,42 @@ class LstmModelParams(BaseModel):
     num_epochs: int = 3
 
 
+class FeatureSpec(BaseModel):
+    """One feature in a task's input contract.
+
+    A task lists its features in order; the **first feature is the
+    target** (what gets forecast). Any additional features are
+    exogenous covariates that condition the prediction. The lib calls
+    this convention "target plus covariates" — it matches how
+    ``pytorch-forecasting`` / ``darts`` / Chronos all frame
+    multivariate forecasting.
+
+    ``name`` becomes the ``InputSpec`` ``feature_names[i]`` and the
+    key clients use in ``input_series`` at predict time. Loaders
+    rename the source column to this name so naming is consistent
+    regardless of what the upstream telemetry labels its value column.
+
+    ``query`` is the PromQL string used when ``telemetry.source ==
+    "prometheus"``. In static mode the train request body supplies a
+    CSV filename and ``query`` is unused.
+
+    ``value_range`` is a ``(lo, hi)`` clamp enforced at predict time;
+    out-of-range values return 422 before the model runs.
+    """
+
+    name: str
+    query: str | None = None
+    value_range: tuple[float, float] | None = None
+
+
 class _BaseTaskConfig(BaseModel):
     """Fields shared by every kind.
 
-    ``feature`` is both the InputSpec ``feature_names[0]`` and the key
-    clients use in ``input_series`` at predict time. The loader renames
-    the source column to this name (see ``PrometheusLoader`` /
-    ``StaticCsvLoader``), so feature naming is consistent regardless of
-    what the upstream telemetry source labels its value column.
-
-    ``query`` is the PromQL string used when ``telemetry.source ==
-    "prometheus"``. In static mode the train request body supplies the
-    CSV filename; ``query`` is unused and may be left ``None``.
+    ``features`` is a non-empty list of ``FeatureSpec``. Length 1 is
+    univariate; length ≥ 2 is multivariate with the first feature as
+    target. Each kind decides how it handles n > 1 — ARIMA refuses
+    (use VAR), XGB/LSTM treat extras as covariates, drift monitors
+    each feature independently.
 
     ``pinned_version`` locks predict requests to a specific Bento
     version (e.g. for rollback or staged rollouts). ``None`` means the
@@ -180,9 +204,7 @@ class _BaseTaskConfig(BaseModel):
     ``PredictRequest.model_version``.
     """
 
-    feature: str
-    value_range: tuple[float, float] | None = None
-    query: str | None = None
+    features: list[FeatureSpec] = Field(..., min_length=1)
     pinned_version: str | None = None
     bootstrap: BootstrapConfig = BootstrapConfig()
 

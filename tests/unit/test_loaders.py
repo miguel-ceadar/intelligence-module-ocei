@@ -90,14 +90,14 @@ def test_static_loader_raises_clear_error_on_too_few_rows(tmp_path):
         loader(StaticDataSource(kind="static", name="tiny.csv"))
 
 
-def test_factory_signature_is_backwards_compatible(samples_dir):
-    """``static_csv_loader(value_col=..., base_dir=...)`` must keep
-    producing a working loader — existing factories in catalog.py rely on
-    this signature.
+def test_factory_signature_supports_optional_value_cols(samples_dir):
+    """``static_csv_loader(value_cols=..., base_dir=...)`` produces a
+    working loader; passing ``value_cols=None`` triggers autodetection
+    of a single numeric column.
     """
     from intelligence.tasks.loaders import static_csv_loader
 
-    loader = static_csv_loader(value_col=None, base_dir=samples_dir)
+    loader = static_csv_loader(value_cols=None, base_dir=samples_dir)
     out = loader(StaticDataSource(kind="static", name="cpu_sample_dataset_orangepi.csv"))
     assert "scaler_obj" in out
 
@@ -138,7 +138,9 @@ def test_prometheus_loader_passes_query_to_source():
     from intelligence.tasks.loaders import PrometheusLoader
 
     source = _FakeSource(_fake_promql_df())
-    loader = PrometheusLoader(source=source, query="rate(node_cpu_seconds_total[5m])")
+    loader = PrometheusLoader(
+        source=source, queries=["rate(node_cpu_seconds_total[5m])"]
+    )
 
     loader(PrometheusDataSource(kind="prometheus", window="1h", step="1m"))
 
@@ -153,7 +155,7 @@ def test_prometheus_loader_translates_window_step_to_datetime():
     from intelligence.tasks.loaders import PrometheusLoader
 
     source = _FakeSource(_fake_promql_df())
-    loader = PrometheusLoader(source=source, query="up")
+    loader = PrometheusLoader(source=source, queries=["up"])
     loader(PrometheusDataSource(kind="prometheus", window="2h", step="30s"))
 
     call = source.calls[0]
@@ -168,7 +170,7 @@ def test_prometheus_loader_runs_default_prepare():
     from intelligence.tasks.loaders import PrometheusLoader
 
     source = _FakeSource(_fake_promql_df())
-    loader = PrometheusLoader(source=source, query="up")
+    loader = PrometheusLoader(source=source, queries=["up"])
     out = loader(PrometheusDataSource(kind="prometheus", window="1h", step="1m"))
 
     assert {"X_train", "X_test", "y_train", "y_test", "scaler_obj"} <= set(out)
@@ -186,7 +188,7 @@ def test_prometheus_loader_accepts_custom_prepare():
 
     fake_df = _fake_promql_df()
     source = _FakeSource(fake_df)
-    loader = PrometheusLoader(source=source, query="up", prepare=custom_prepare)
+    loader = PrometheusLoader(source=source, queries=["up"], prepare=custom_prepare)
     out = loader(PrometheusDataSource(kind="prometheus", window="1h", step="1m"))
 
     assert out == {"marker": "custom"}
@@ -197,7 +199,7 @@ def test_prometheus_loader_rejects_wrong_descriptor():
     from intelligence.tasks.loaders import PrometheusLoader
 
     source = _FakeSource(_fake_promql_df())
-    loader = PrometheusLoader(source=source, query="up")
+    loader = PrometheusLoader(source=source, queries=["up"])
     with pytest.raises(ValueError, match="PrometheusDataSource"):
         loader(StaticDataSource(kind="static", name="x.csv"))
 
@@ -226,7 +228,7 @@ def test_prometheus_loader_strips_nan_and_inf_before_prepare():
         seen["has_inf"] = bool(np.isinf(df["value"]).any())
         return {"marker": "ok"}
 
-    loader = PrometheusLoader(source=_FakeSource(base), query="up", prepare=custom_prepare)
+    loader = PrometheusLoader(source=_FakeSource(base), queries=["up"], prepare=custom_prepare)
     loader(PrometheusDataSource(kind="prometheus", window="1h", step="1m"))
 
     assert seen["rows"] == 37  # 40 minus the three holes
@@ -243,7 +245,7 @@ def test_prometheus_loader_raises_clear_error_on_too_few_points():
     from intelligence.tasks.loaders import PrometheusLoader
 
     source = _FakeSource(_fake_promql_df(n=5))
-    loader = PrometheusLoader(source=source, query="rate(metric[1m])")
+    loader = PrometheusLoader(source=source, queries=["rate(metric[1m])"])
 
     with pytest.raises(ValueError, match=r"5 usable point.* need at least 30"):
         loader(PrometheusDataSource(kind="prometheus", window="1h", step="1m"))
@@ -256,7 +258,7 @@ def test_prometheus_loader_min_points_is_configurable():
     from intelligence.tasks.loaders import PrometheusLoader
 
     source = _FakeSource(_fake_promql_df(n=5))
-    loader = PrometheusLoader(source=source, query="up", min_points=2)
+    loader = PrometheusLoader(source=source, queries=["up"], min_points=2)
     out = loader(PrometheusDataSource(kind="prometheus", window="1h", step="1m"))
     assert "scaler_obj" in out
 
@@ -271,7 +273,7 @@ def test_prometheus_loader_raises_clear_error_on_empty_response():
 
     empty_df = pd.DataFrame(columns=["timestamp", "value"])
     source = _FakeSource(empty_df)
-    loader = PrometheusLoader(source=source, query="nonsense_metric")
+    loader = PrometheusLoader(source=source, queries=["nonsense_metric"])
 
     with pytest.raises(ValueError, match=r"no data.*nonsense_metric"):
         loader(PrometheusDataSource(kind="prometheus", window="1h", step="1m"))
@@ -293,9 +295,69 @@ def test_prometheus_loader_propagates_transport_errors():
         def is_ready(self):
             return False, "down"
 
-    loader = PrometheusLoader(source=_FlakySource(), query="up")
+    loader = PrometheusLoader(source=_FlakySource(), queries=["up"])
     with pytest.raises(requests.ConnectionError):
         loader(PrometheusDataSource(kind="prometheus", window="1h", step="1m"))
+
+
+def test_prometheus_loader_rejects_empty_queries_list():
+    """A loader with no queries can't fetch anything — fail loudly at
+    construction rather than producing a useless instance."""
+    from intelligence.tasks.loaders import PrometheusLoader
+
+    with pytest.raises(ValueError, match="at least one query"):
+        PrometheusLoader(source=_FakeSource(_fake_promql_df()), queries=[])
+
+
+def test_prometheus_loader_rejects_mismatched_value_cols():
+    """``value_cols`` must pair 1:1 with ``queries`` — anything else is
+    a builder bug surfaced loudly."""
+    from intelligence.tasks.loaders import PrometheusLoader
+
+    with pytest.raises(ValueError, match="pair 1:1"):
+        PrometheusLoader(
+            source=_FakeSource(_fake_promql_df()),
+            queries=["up", "down"],
+            value_cols=["cpu"],
+        )
+
+
+def test_prometheus_loader_multivariate_joins_on_timestamp():
+    """Two queries → two features. Results join on timestamp; the
+    DataFrame fed to ``prepare`` has both feature columns named after
+    ``value_cols``.
+    """
+    from intelligence.api.schemas import PrometheusDataSource
+    from intelligence.tasks.loaders import PrometheusLoader
+
+    class _DualSource:
+        def __init__(self, by_query: dict[str, pd.DataFrame]) -> None:
+            self._by_query = by_query
+
+        def fetch_range(self, query, start=None, end=None, step=None):
+            return self._by_query[query].copy()
+
+    cpu_df = _fake_promql_df(n=40)
+    mem_df = _fake_promql_df(n=40)
+    mem_df["value"] = [0.6 + 0.005 * i for i in range(40)]
+
+    seen: dict = {}
+
+    def custom_prepare(df):
+        seen["columns"] = list(df.columns)
+        seen["rows"] = len(df)
+        return {"marker": "ok"}
+
+    loader = PrometheusLoader(
+        source=_DualSource({"cpu_q": cpu_df, "mem_q": mem_df}),
+        queries=["cpu_q", "mem_q"],
+        value_cols=["cpu", "mem"],
+        prepare=custom_prepare,
+    )
+    loader(PrometheusDataSource(kind="prometheus", window="1h", step="1m"))
+
+    assert seen["columns"] == ["timestamp", "cpu", "mem"]
+    assert seen["rows"] == 40
 
 
 @pytest.mark.parametrize(

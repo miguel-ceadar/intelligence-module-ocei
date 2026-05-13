@@ -2,8 +2,9 @@
 
 The factory helper consults ``IntelligenceConfig.telemetry`` to decide
 whether a task gets a CSV-backed loader or a PromQL-backed one. The
-PromQL query for each task comes from the task's own config block —
-callers (the per-kind builders) pass it through explicitly.
+PromQL queries for each task come from the task's own ``features:``
+block — callers (the per-kind builders) pass them through explicitly
+as parallel ``value_cols`` / ``queries`` lists.
 """
 
 from __future__ import annotations
@@ -34,10 +35,10 @@ def test_prometheus_config_yields_prometheus_loader():
     loader = build_loader_for_task(
         cfg,
         "cpu_forecast_arima",
-        query="rate(node_cpu_seconds_total[5m])",
+        queries=["rate(node_cpu_seconds_total[5m])"],
     )
     assert isinstance(loader, PrometheusLoader)
-    assert loader.query == "rate(node_cpu_seconds_total[5m])"
+    assert loader.queries == ["rate(node_cpu_seconds_total[5m])"]
 
 
 def test_prometheus_missing_query_raises():
@@ -63,20 +64,20 @@ def test_prometheus_loader_carries_endpoint_and_auth():
             tls_skip_verify=True,
         ),
     )
-    loader = build_loader_for_task(cfg, "cpu_forecast_arima", query="up")
+    loader = build_loader_for_task(cfg, "cpu_forecast_arima", queries=["up"])
     assert isinstance(loader.source, PrometheusSource)
     assert loader.source.endpoint == "https://thanos.internal:10902"
     assert loader.source.token_env == "PROM_TOKEN"
     assert loader.source.tls_skip_verify is True
 
 
-def test_value_col_kwarg_is_accepted_for_both_loader_kinds():
-    """The helper forwards ``value_col`` to whichever loader it builds so
-    each task (e.g. ``mem_forecast_arima``) can normalise its column name.
+def test_value_cols_kwarg_is_accepted_for_both_loader_kinds():
+    """The helper forwards ``value_cols`` to whichever loader it builds so
+    each task can normalise its column names.
     """
     from intelligence.tasks.loaders import build_loader_for_task
 
-    static_loader = build_loader_for_task(_cfg(), "cpu_forecast_arima", value_col="CPU")
+    static_loader = build_loader_for_task(_cfg(), "cpu_forecast_arima", value_cols=["CPU"])
     assert static_loader is not None
 
     prom_cfg = _cfg(
@@ -86,7 +87,25 @@ def test_value_col_kwarg_is_accepted_for_both_loader_kinds():
     prom_loader = build_loader_for_task(
         prom_cfg,
         "cpu_forecast_arima",
-        value_col="cpu",
-        query="up",
+        value_cols=["cpu"],
+        queries=["up"],
     )
     assert prom_loader is not None
+
+
+def test_prometheus_rejects_feature_with_missing_query():
+    """If any feature's query is None in prom mode, fail at registry-build
+    time so misconfigured multi-feature tasks don't blow up at /train."""
+    from intelligence.tasks.loaders import build_loader_for_task
+
+    cfg = _cfg(
+        source="prometheus",
+        prometheus=PrometheusConfig(endpoint="http://prom:9090"),
+    )
+    with pytest.raises(ValueError, match="no PromQL query"):
+        build_loader_for_task(
+            cfg,
+            "mvar_task",
+            value_cols=["cpu", "mem"],
+            queries=["up", None],
+        )

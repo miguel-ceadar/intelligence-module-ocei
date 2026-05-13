@@ -71,7 +71,7 @@ def test_loader_rejects_override_when_flag_off():
             # allow_endpoint_override defaults to False
         ),
     )
-    loader = build_loader_for_task(cfg, "cpu_forecast_arima", query="up")
+    loader = build_loader_for_task(cfg, "cpu_forecast_arima", queries=["up"])
     desc = PrometheusDataSource(
         kind="prometheus",
         window="1h",
@@ -100,7 +100,7 @@ def test_loader_uses_override_when_flag_on():
             allow_endpoint_override=True,
         ),
     )
-    loader = build_loader_for_task(cfg, "cpu_forecast_arima", query="up")
+    loader = build_loader_for_task(cfg, "cpu_forecast_arima", queries=["up"])
     desc = PrometheusDataSource(
         kind="prometheus",
         window="1h",
@@ -160,7 +160,7 @@ def test_loader_rejects_ssrf_targets_even_when_flag_on(bad_url, reason):
             allow_endpoint_override=True,
         ),
     )
-    loader = build_loader_for_task(cfg, "cpu_forecast_arima", query="up")
+    loader = build_loader_for_task(cfg, "cpu_forecast_arima", queries=["up"])
     desc = PrometheusDataSource(kind="prometheus", window="1h", step="1m", endpoint=bad_url)
     with pytest.raises(ValueError, match=r"https|loopback|private|metadata|link-local"):
         loader(desc)
@@ -180,7 +180,7 @@ def test_loader_falls_back_to_configured_endpoint_when_no_override():
             allow_endpoint_override=True,
         ),
     )
-    loader = build_loader_for_task(cfg, "cpu_forecast_arima", query="up")
+    loader = build_loader_for_task(cfg, "cpu_forecast_arima", queries=["up"])
     desc = PrometheusDataSource(kind="prometheus", window="1h", step="1m")
 
     captured: list[str] = []

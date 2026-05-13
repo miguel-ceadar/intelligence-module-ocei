@@ -14,33 +14,37 @@ intelligence:
   tasks:
     energy_forecast_arima:
       kind: arima
-      feature: energy
-      value_range: [0.0, 500.0]   # watts; widen if your nodes draw more
       steps_back: 1
-      query: 'sum(rate(kepler_node_package_joules_total[30s]))'
+      features:
+        - name: energy
+          value_range: [0.0, 500.0]   # watts; widen if your nodes draw more
+          query: 'sum(rate(kepler_node_package_joules_total[30s]))'
 
     energy_forecast_xgb:
       kind: xgb
-      feature: energy
-      value_range: [0.0, 500.0]
       steps_back: 6
-      query: 'sum(rate(kepler_node_package_joules_total[30s]))'
+      features:
+        - name: energy
+          value_range: [0.0, 500.0]
+          query: 'sum(rate(kepler_node_package_joules_total[30s]))'
 
     energy_forecast_lstm:
       kind: lstm
-      feature: energy
-      value_range: [0.0, 500.0]
       steps_back: 6
       batch_size: 16
-      query: 'sum(rate(kepler_node_package_joules_total[30s]))'
       model_params:
         hidden_size: 4
         num_epochs: 3
+      features:
+        - name: energy
+          value_range: [0.0, 500.0]
+          query: 'sum(rate(kepler_node_package_joules_total[30s]))'
 
     energy_forecast_arima_drift:
       kind: drift
-      feature: energy
-      value_range: [0.0, 500.0]
       forecaster: energy_forecast_arima
       chunk_size: 12
-      query: 'sum(rate(kepler_node_package_joules_total[30s]))'
+      features:
+        - name: energy
+          value_range: [0.0, 500.0]
+          query: 'sum(rate(kepler_node_package_joules_total[30s]))'

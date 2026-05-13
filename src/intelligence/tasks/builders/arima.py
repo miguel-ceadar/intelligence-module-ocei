@@ -21,6 +21,17 @@ def build_arima_task(
     # not configured for this task don't pull it.
     from intelligence.ml.models.arima import ArimaModel
 
+    # ARIMA is univariate by construction. Multivariate ARIMA is VAR
+    # (a different statsmodels API); ship that as its own `kind: var`
+    # rather than silently picking one feature and dropping the rest.
+    if len(task_cfg.features) > 1:
+        names = [f.name for f in task_cfg.features]
+        raise ValueError(
+            f"ARIMA task {name!r} declares {len(task_cfg.features)} features ({names}); "
+            f"ARIMA is univariate. Drop the extra features, or switch to a multivariate "
+            f"kind once `kind: var` ships."
+        )
+
     return BaseTask(
         name=name,
         model=ArimaModel(
@@ -31,13 +42,12 @@ def build_arima_task(
         data_loader=build_loader_for_task(
             intelligence_cfg,
             name,
-            value_col=task_cfg.feature,
-            query=task_cfg.query,
+            value_cols=[f.name for f in task_cfg.features],
+            queries=[f.query for f in task_cfg.features],
         ),
         input_spec=build_input_spec(
-            feature=task_cfg.feature,
+            features=task_cfg.features,
             steps_back=task_cfg.steps_back,
-            value_range=task_cfg.value_range,
         ),
         pinned_version=task_cfg.pinned_version,
     )

@@ -28,15 +28,13 @@ Cheap, doc-side changes.
   the [`examples/energy_forecast/`](examples/energy_forecast/) recipe
   table — no new bundled data, no library changes.
 
-## Phase 2 — Adjacent ingestion
+## Phase 2 — Backend compatibility - DONE
 
-Independent track.
-
-- **OpenTelemetry source.** Lib-side change in `src/intelligence/telemetry/`,
-  isolated, low risk. Extends `TelemetryConfig.source` and adds a
-  `TelemetrySource` implementation alongside `static` and `prometheus`.
-
-  - Thanos connection considered as a follow-up.
+No code change required. `PrometheusSource` speaks any
+Prom-API-compatible backend (Thanos Query, Mimir, Cortex) by virtue
+of the shared `/api/v1/query_range` and `/api/v1/query` paths.
+Future tutorials will demonstrate the long-history case by pointing
+at a Thanos endpoint.
 
 ## Phase 3 — Multivariate
 
@@ -98,7 +96,7 @@ Optional follow-up: `kind: timesfm` once Chronos has settled.
   per-horizon error metrics. Pilots will ask "how good is this
   forecast?" — this is the answer.
 
-## Phase 7 — Adjacencies, pilot-driven
+## Phase 7 — Adjacent improvements
 
 Only when a pilot actually asks for one of these:
 

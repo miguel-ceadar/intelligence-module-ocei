@@ -252,20 +252,19 @@ class ModelTrainer:
 
         outputs = model(self.data_components["X_test"].to(device_t))
         y_pred = outputs.cpu().detach().numpy().reshape(outputs.shape[0], outputs.shape[1])
-        # y is shape (samples, horizon * num_variables). The scaler was fit on
-        # (*, num_variables); flatten the horizon axis to make inverse_transform
-        # shape-compatible, then restore.
-        num_variables = int(self.data_components.get("num_variables", 1))
+        # y is shape (samples, horizon) — target-only output. ``scaler_obj``
+        # is the target scaler (univariate); inverse-transform via a
+        # column reshape and restore.
         samples = y_pred.shape[0]
         y_pred_inv = (
             self.data_components["scaler_obj"]
-            .inverse_transform(y_pred.reshape(-1, num_variables))
+            .inverse_transform(y_pred.reshape(-1, 1))
             .reshape(samples, -1)
         )
         y_test_arr = self.data_components["y_test"]
         y_test_inv = (
             self.data_components["scaler_obj"]
-            .inverse_transform(y_test_arr.reshape(-1, num_variables))
+            .inverse_transform(y_test_arr.reshape(-1, 1))
             .reshape(samples, -1)
         )
 

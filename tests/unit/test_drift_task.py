@@ -105,6 +105,57 @@ def test_drift_predict_on_shifted_chunk_reports_drift(tmp_path, monkeypatch):
     assert resp.prediction["drift_detected"] is True
 
 
+def test_drift_multivariate_alerts_on_any_feature_drift(tmp_path, monkeypatch):
+    """Multivariate drift monitors each feature independently; any one
+    shifting raises the alert. NannyML's ``UnivariateDriftCalculator``
+    already operates per-column, so the lib just needs to surface a
+    list of column names through the prepare path."""
+    from intelligence.tasks.contracts import InputSpec
+    from intelligence.tasks.drift import DriftDetectionTask
+
+    monkeypatch.setenv("BENTOML_HOME", str(tmp_path / "bentoml"))
+
+    rng = np.random.default_rng(1)
+    reference_mv = pd.DataFrame(
+        {
+            "cpu": rng.normal(0.5, 0.05, 300).clip(0.0, 1.0),
+            "mem": rng.normal(0.6, 0.04, 300).clip(0.0, 1.0),
+        }
+    )
+
+    def loader(_descriptor):
+        return {"reference_df": reference_mv, "drift_columns": ["cpu", "mem"]}
+
+    task = DriftDetectionTask(
+        name="cpu_mem_drift",
+        forecaster_task_name="cpu_mem_forecaster",
+        model=None,
+        data_loader=loader,
+        input_spec=InputSpec(
+            n_features=2,
+            feature_names=["cpu", "mem"],
+            steps_back=12,
+            value_range={"cpu": (0.0, 1.0), "mem": (0.0, 1.0)},
+        ),
+        chunk_size=12,
+    )
+    task.train(
+        TrainRequest(
+            data_source=StaticDataSource(kind="static", name="ignored"),
+            model_parameters={},
+        )
+    )
+
+    rng2 = np.random.default_rng(7)
+    # cpu stationary; mem shifted up. Drift should fire on mem alone.
+    chunk = {
+        "cpu": rng2.normal(0.5, 0.05, 12).clip(0.0, 1.0).tolist(),
+        "mem": rng2.normal(0.95, 0.01, 12).clip(0.0, 1.0).tolist(),
+    }
+    resp = task.predict(PredictRequest(input_series=chunk))
+    assert resp.prediction["drift_detected"] is True
+
+
 def test_drift_task_is_registered_via_builder(tmp_path, monkeypatch):
     """A drift task block under ``cfg.tasks`` registers via the drift
     builder and carries its forecaster reference.
@@ -112,6 +163,7 @@ def test_drift_task_is_registered_via_builder(tmp_path, monkeypatch):
     from intelligence.config.settings import (
         ArimaTaskConfig,
         DriftTaskConfig,
+        FeatureSpec,
         IntelligenceConfig,
     )
     from intelligence.tasks import build_registry_from_config
@@ -119,10 +171,12 @@ def test_drift_task_is_registered_via_builder(tmp_path, monkeypatch):
     monkeypatch.setenv("BENTOML_HOME", str(tmp_path / "bentoml"))
     cfg = IntelligenceConfig(
         tasks={
-            "cpu_forecast_arima": ArimaTaskConfig(kind="arima", feature="cpu"),
+            "cpu_forecast_arima": ArimaTaskConfig(
+                kind="arima", features=[FeatureSpec(name="cpu")]
+            ),
             "cpu_forecast_arima_drift": DriftTaskConfig(
                 kind="drift",
-                feature="cpu",
+                features=[FeatureSpec(name="cpu")],
                 forecaster="cpu_forecast_arima",
             ),
         },

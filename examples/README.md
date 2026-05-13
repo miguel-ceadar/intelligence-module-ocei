@@ -55,7 +55,8 @@ arbitrarily many. No code change required.
 1. Create a directory under `examples/` named after your domain.
 2. Write a `config.yaml` declaring one or more tasks under `tasks:`,
    each picking a `kind:` (`arima` / `xgb` / `lstm` / `drift`) and a
-   `feature:` matching the metric you care about.
+   `features:` list. The first feature is the target (what gets
+   forecast); additional entries are covariates.
 3. Add a `README.md` describing the metric, the PromQL queries, and
    anything pilot-specific.
 

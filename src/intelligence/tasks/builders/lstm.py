@@ -31,19 +31,18 @@ def build_lstm_task(
         data_loader=build_loader_for_task(
             intelligence_cfg,
             name,
-            value_col=task_cfg.feature,
+            value_cols=[f.name for f in task_cfg.features],
             prepare=make_lstm_prepare(
                 look_back=task_cfg.steps_back,
-                num_variables=1,
+                num_variables=len(task_cfg.features),
                 batch_size=task_cfg.batch_size,
                 horizon=task_cfg.horizon,
             ),
-            query=task_cfg.query,
+            queries=[f.query for f in task_cfg.features],
         ),
         input_spec=build_input_spec(
-            feature=task_cfg.feature,
+            features=task_cfg.features,
             steps_back=task_cfg.steps_back,
-            value_range=task_cfg.value_range,
             max_horizon=task_cfg.horizon,
         ),
         pinned_version=task_cfg.pinned_version,

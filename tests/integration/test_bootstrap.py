@@ -26,6 +26,7 @@ def _cfg_with_bootstrap(task_name: str, **boot_kwargs):
     from intelligence.config.settings import (
         ArimaTaskConfig,
         BootstrapConfig,
+        FeatureSpec,
         IntelligenceConfig,
     )
 
@@ -33,7 +34,7 @@ def _cfg_with_bootstrap(task_name: str, **boot_kwargs):
         tasks={
             task_name: ArimaTaskConfig(
                 kind="arima",
-                feature="cpu",
+                features=[FeatureSpec(name="cpu")],
                 bootstrap=BootstrapConfig(**boot_kwargs),
             ),
         },
@@ -50,7 +51,8 @@ def test_bootstrap_config_round_trips_from_yaml(tmp_path):
           tasks:
             cpu_forecast_arima:
               kind: arima
-              feature: cpu
+              features:
+                - name: cpu
               bootstrap:
                 auto_train_on_startup: true
                 dataset_name: cpu_sample_dataset_orangepi.csv
@@ -90,6 +92,7 @@ def test_build_data_source_for_prometheus():
     from intelligence.config.settings import (
         ArimaTaskConfig,
         BootstrapConfig,
+        FeatureSpec,
         IntelligenceConfig,
         PrometheusConfig,
         TelemetryConfig,
@@ -104,8 +107,7 @@ def test_build_data_source_for_prometheus():
         tasks={
             "cpu_forecast_arima": ArimaTaskConfig(
                 kind="arima",
-                feature="cpu",
-                query="up",
+                features=[FeatureSpec(name="cpu", query="up")],
                 bootstrap=BootstrapConfig(
                     auto_train_on_startup=True,
                     window="2h",

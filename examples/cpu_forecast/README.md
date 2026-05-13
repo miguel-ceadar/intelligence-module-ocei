@@ -64,9 +64,10 @@ intelligence:
   tasks:
     cpu_forecast_arima:
       kind: arima
-      feature: cpu
-      value_range: [0.0, 1.0]
       steps_back: 1
+      features:
+        - name: cpu
+          value_range: [0.0, 1.0]
 ```
 
 ```bash
