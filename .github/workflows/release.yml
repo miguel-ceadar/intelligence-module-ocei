@@ -98,7 +98,7 @@ jobs:
         # by the time the scan reports. The job fails on findings — the
         # tag is published but the release status is red, so pilots see
         # the failure on the GitHub release page.
-        uses: aquasecurity/trivy-action@0.28.0
+        uses: aquasecurity/trivy-action@v0.36.0
         with:
           image-ref: ghcr.io/${{ steps.owner.outputs.value }}/${{ env.IMAGE_NAME }}@${{ steps.build.outputs.digest }}
           format: table

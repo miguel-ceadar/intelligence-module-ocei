@@ -46,13 +46,18 @@ jobs:
       - name: Test (unit + integration, smoke excluded by config)
         run: uv run pytest
 
+      - name: Export resolved deps for audit
+        # pip-audit needs a flat requirements.txt; uv.lock + pyproject
+        # aren't directly consumable. `--no-emit-project` skips our own
+        # package metadata; `--extra dev` mirrors the install above.
+        run: uv export --no-emit-project --extra dev --output-file=/tmp/requirements-audit.txt
+
       - name: Audit Python deps for known CVEs (pip-audit)
-        # Runs against the resolved environment. Fails the job on any
-        # finding by default — bump or vendor-fix a transitive dep
-        # rather than suppressing here. To skip a specific CVE that
-        # has no upstream fix, add it to ignore-vulns below.
+        # Fails the job on any finding by default — bump or vendor-fix
+        # a transitive dep rather than suppressing here. To skip a
+        # specific CVE that has no upstream fix, add it to ignore-vulns.
         uses: pypa/gh-action-pip-audit@v1.1.0
         with:
-          inputs: pyproject.toml
+          inputs: /tmp/requirements-audit.txt
           # ignore-vulns: |
           #   GHSA-xxxx-yyyy-zzzz
