@@ -1,0 +1,66 @@
+{{- $fullname := include "intelligence.fullname" . -}}
+{{- $authEnv := "" -}}
+{{- with .Values.config }}{{- with .intelligence }}{{- with .auth }}{{- $authEnv = .token_env | default "" -}}{{- end }}{{- end }}{{- end }}
+{{ $fullname }} installed in namespace {{ .Release.Namespace }}.
+
+Reach the service:
+
+  kubectl -n {{ .Release.Namespace }} port-forward svc/{{ $fullname }} 3000:{{ .Values.service.port }}
+
+Check it's serving:
+{{ if $authEnv }}
+  # auth.token_env is set ({{ $authEnv }}) — protected routes need a Bearer header.
+  curl http://localhost:3000/healthz
+  curl http://localhost:3000/readyz
+  curl -H "Authorization: Bearer $TOKEN" http://localhost:3000/tasks
+{{- else }}
+  curl http://localhost:3000/healthz
+  curl http://localhost:3000/readyz
+  curl http://localhost:3000/tasks
+{{- end }}
+
+{{- if .Values.persistence.enabled }}
+
+Persistence: PVC {{ $fullname }}-bentoml ({{ .Values.persistence.size }},
+{{ .Values.persistence.accessMode }}{{ with .Values.persistence.storageClassName }}, storageClass={{ . }}{{ end }}).
+If the pod stays Pending, inspect:
+
+  kubectl -n {{ .Release.Namespace }} describe pvc {{ $fullname }}-bentoml
+  kubectl -n {{ .Release.Namespace }} describe pod -l app.kubernetes.io/instance={{ .Release.Name }}
+{{- end }}
+
+{{- if .Values.serviceMonitor.enabled }}
+
+ServiceMonitor enabled — kube-prometheus-stack will scrape /metrics every
+{{ .Values.serviceMonitor.interval }}. Confirm it's discovered:
+
+  kubectl -n {{ .Release.Namespace }} get servicemonitor {{ $fullname }} -o yaml
+{{- end }}
+
+{{- if .Values.retraining.enabled }}
+
+Retraining CronJob enabled — schedule {{ .Values.retraining.schedule | quote }}, tasks:
+{{- range .Values.retraining.tasks }}
+  - {{ . }}
+{{- end }}
+{{- end }}
+
+{{- if .Values.networkPolicy.enabled }}
+
+NetworkPolicy enabled. {{ if and (empty .Values.networkPolicy.ingress) (empty .Values.networkPolicy.egress) -}}
+WARNING: both ingress and egress are empty — the pod can't be reached
+(not even by kube-prometheus-stack) and can't reach Prometheus / HF.
+Add explicit rules under networkPolicy.ingress / .egress in your values,
+or set networkPolicy.enabled=false.
+{{- else -}}
+Only DNS egress is permitted by default; everything else must be listed
+under networkPolicy.ingress / .egress.
+{{- end }}
+{{- end }}
+
+Next steps:
+- Pin a model after training: pass `model_version` on /predict, or set
+  `pinned_version:` on the task config block.
+- Reclaim PVC space: `DELETE /tasks/<task>/versions/<version>` (refuses
+  `latest` and the currently pinned version).
+- Walkthrough: docs/getting-started.md (port-forward → train → predict).

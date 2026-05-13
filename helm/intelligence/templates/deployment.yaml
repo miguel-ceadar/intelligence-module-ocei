@@ -1,3 +1,14 @@
+{{- /*
+Pre-flight guards. We refuse to render configurations that are silently
+broken at runtime — better a clear `helm install` error than a
+CrashLoopBackOff or a silently-ignored field.
+*/ -}}
+{{- if and (gt (int .Values.replicaCount) 1) .Values.persistence.enabled (eq .Values.persistence.accessMode "ReadWriteOnce") -}}
+{{- fail (printf "replicaCount=%d with persistence.accessMode=ReadWriteOnce: only one pod can mount the PVC at a time; the others stay Pending with MultiAttachError. Set persistence.accessMode to ReadWriteMany (and pick a storageClassName that supports it), or set replicaCount=1." (int .Values.replicaCount)) -}}
+{{- end -}}
+{{- if and .Values.existingSecretName .Values.secretEnv -}}
+{{- fail "existingSecretName and secretEnv are both set: secretEnv would be silently ignored. Pick one — either reference an existing Secret (existingSecretName) or let the chart create one from secretEnv." -}}
+{{- end -}}
 apiVersion: apps/v1
 kind: Deployment
 metadata:

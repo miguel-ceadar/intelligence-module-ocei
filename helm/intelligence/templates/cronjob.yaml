@@ -1,4 +1,6 @@
 {{- if .Values.retraining.enabled -}}
+{{- $authTokenEnv := "" -}}
+{{- with .Values.config }}{{- with .intelligence }}{{- with .auth }}{{- $authTokenEnv = .token_env | default "" -}}{{- end }}{{- end }}{{- end }}
 apiVersion: batch/v1
 kind: CronJob
 metadata:
@@ -18,6 +20,14 @@ spec:
           containers:
             - name: retrain
               image: curlimages/curl:8.6.0
+              {{- if $authTokenEnv }}
+              env:
+                - name: {{ $authTokenEnv }}
+                  valueFrom:
+                    secretKeyRef:
+                      name: {{ include "intelligence.secretName" . }}
+                      key: {{ $authTokenEnv }}
+              {{- end }}
               command:
                 - /bin/sh
                 - -c
@@ -27,6 +37,9 @@ spec:
                   echo "Retraining {{ . }}..."
                   curl -fsS -X POST \
                     -H 'Content-Type: application/json' \
+                    {{- if $authTokenEnv }}
+                    -H "Authorization: Bearer ${{ $authTokenEnv }}" \
+                    {{- end }}
                     -d '{"data_source": {{ $.Values.retraining.dataSource | toJson }}}' \
                     http://{{ include "intelligence.fullname" $ }}:{{ $.Values.service.port }}/tasks/{{ . }}/train
                   {{- end }}
