@@ -1,11 +1,14 @@
-"""GET /tasks/{task}/versions — list locally-stored Bento versions."""
+"""GET /tasks/{task}/versions — list locally-stored artefact versions."""
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from pathlib import Path
 from unittest import mock
 
 import pytest
+
+from intelligence.ml.artifact import SavedArtifact
+from intelligence.ml.artifact.manifest import Manifest
 
 pytestmark = pytest.mark.integration
 
@@ -24,14 +27,20 @@ def client(app):
     return TestClient(app)
 
 
-def _fake_model(name: str, version: str, when: datetime):
-    m = mock.MagicMock()
-    m.tag = mock.MagicMock(name=name, version=version)
-    m.tag.name = name
-    m.tag.version = version
-    m.tag.__str__ = lambda _self: f"{name}:{version}"
-    m.info.creation_time = when
-    return m
+def _fake_artifact(name: str, version: str, when: str) -> SavedArtifact:
+    return SavedArtifact(
+        tag=f"{name}:{version}",
+        name=name,
+        version=version,
+        path=Path("/fake"),
+        manifest=Manifest(
+            schema_version=1,
+            kind="arima",
+            created_at=when,
+            files={},
+        ),
+        created_at=when,
+    )
 
 
 def test_versions_endpoint_404_for_unknown_task(client):
@@ -45,7 +54,9 @@ def test_versions_endpoint_returns_empty_list_when_no_training_has_happened(clie
     train shouldn't see an error."""
     if "cpu_forecast_arima" not in api.registry:
         pytest.skip("cpu_forecast_arima not registered in this config")
-    with mock.patch("bentoml.models.list", return_value=[]):
+    with mock.patch(
+        "intelligence.api.service.list_artifacts_by_name", return_value=[]
+    ):
         resp = client.get("/tasks/cpu_forecast_arima/versions")
     assert resp.status_code == 200
     body = resp.json()
@@ -56,18 +67,22 @@ def test_versions_endpoint_returns_empty_list_when_no_training_has_happened(clie
 
 
 def test_versions_endpoint_sorts_newest_first(client):
+    """``list_artifacts_by_name`` returns newest first; the endpoint
+    preserves that order in the response.
+    """
     if "cpu_forecast_arima" not in api.registry:
         pytest.skip("cpu_forecast_arima not registered in this config")
 
-    older = _fake_model("cpu_forecast_arima", "abc111", datetime(2026, 1, 1, tzinfo=UTC))
-    newer = _fake_model("cpu_forecast_arima", "abc222", datetime(2026, 5, 1, tzinfo=UTC))
-    unrelated = _fake_model("mem_forecast_arima", "abc333", datetime(2026, 6, 1, tzinfo=UTC))
+    # list_artifacts_by_name already filters by name and sorts newest first;
+    # the endpoint just maps to JSON.
+    newer = _fake_artifact("cpu_forecast_arima", "abc222", "2026-05-01T00:00:00+00:00")
+    older = _fake_artifact("cpu_forecast_arima", "abc111", "2026-01-01T00:00:00+00:00")
 
-    with mock.patch("bentoml.models.list", return_value=[older, newer, unrelated]):
+    with mock.patch(
+        "intelligence.api.service.list_artifacts_by_name",
+        return_value=[newer, older],
+    ):
         resp = client.get("/tasks/cpu_forecast_arima/versions")
     assert resp.status_code == 200
     body = resp.json()
-    versions = body["versions"]
-    assert [v["version"] for v in versions] == ["abc222", "abc111"]
-    # Unrelated bento_name didn't leak in.
-    assert "abc333" not in [v["version"] for v in versions]
+    assert [v["version"] for v in body["versions"]] == ["abc222", "abc111"]

@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Callable
+from pathlib import Path
 from typing import Any
 
 import numpy as np
@@ -47,45 +48,125 @@ class LstmModel:
             "num_epochs": 3,
         }
 
-    def train(
-        self,
-        components: dict,
-        bento_name: str,
-        extras: dict | None = None,
-    ) -> tuple[Any, dict]:
+    # ---- New manifest-based protocol --------------------------------------
+
+    def fit(self, components: dict) -> tuple[dict, dict]:
+        """Train and return ``(artifacts, metrics)``.
+
+        ``artifacts`` carries the runtime state predict consumes: the
+        trained ``nn.Module``, the scaler, and the architecture sizes
+        plus window metadata. ``BaseTask`` injects ``input_spec`` into
+        this dict before calling ``save_artifacts``.
+        """
         from intelligence.ml.trainers import ModelTrainer
 
         params = {**self.default_params, **components.get("model_parameters", {})}
         components_with_params = {**components, "model_parameters": params}
-
         trainer = ModelTrainer(components_with_params)
-        metrics, model, _step_epoch, _step_loss = trainer.train_pytorch()
+        metrics, network, _step_epoch, _step_loss = trainer.train_pytorch()
+        metrics_jsonable = _coerce_jsonable_nested(metrics)
 
-        custom_objects = {
+        artifacts = {
+            "network": network,
             "scaler_obj": components_with_params["scaler_obj"],
             "look_back": components_with_params["look_back"],
             "num_variables": components_with_params["num_variables"],
             "input_size": params["input_size"],
             "output_size": params["output_size"],
             "hidden_size": params["hidden_size"],
-            "horizon": params["output_size"],  # alias kept for clarity at predict
-            "model_metrics": metrics,
-            **(extras or {}),
+            "horizon": params["output_size"],  # alias kept for predict clarity
+            "model_metrics": metrics_jsonable,
         }
+        return artifacts, metrics_jsonable
 
-        import bentoml
+    def save_artifacts(self, artifacts: dict, dest: Path) -> dict[str, str]:
+        """Persist the artefacts as a flat directory and return the
+        ``role -> filename`` map for the manifest.
 
-        bento = bentoml.picklable_model.save_model(
-            bento_name,
-            model,
-            custom_objects=custom_objects,
-            signatures={"predict": {"batchable": True}},
+        State_dict goes to ``lstm.safetensors`` — bit-exact, pickle-
+        free. ``arch.json`` carries the constructor sizes so
+        ``load_artifacts`` can rebuild a fresh ``nn.Module`` of the
+        right shape before loading the state_dict into it.
+        """
+        from safetensors.torch import save_file
+
+        from intelligence.ml.artifact.sidecars import (
+            save_input_spec,
+            save_json,
+            save_sklearn_scaler,
         )
-        return bento, _coerce_jsonable_nested(metrics)
+
+        network = artifacts["network"]
+        network.cpu()  # safetensors is device-agnostic; CPU keeps things portable
+        save_file(network.state_dict(), str(dest / "lstm.safetensors"))
+
+        save_json(
+            dest,
+            "arch.json",
+            {
+                "input_size": int(artifacts["input_size"]),
+                "hidden_size": int(artifacts["hidden_size"]),
+                "output_size": int(artifacts["output_size"]),
+                "look_back": int(artifacts["look_back"]),
+                "num_variables": int(artifacts["num_variables"]),
+            },
+        )
+        save_sklearn_scaler(dest, "scaler", artifacts["scaler_obj"])
+        save_json(dest, "metrics.json", artifacts.get("model_metrics", {}))
+
+        files: dict[str, str] = {
+            "model": "lstm.safetensors",
+            "arch": "arch.json",
+            "scaler_meta": "scaler.json",
+            "scaler_arrays": "scaler.npz",
+            "metrics": "metrics.json",
+        }
+        spec = artifacts.get("input_spec")
+        if spec is not None:
+            save_input_spec(dest, spec)
+            files["input_spec"] = "input_spec.json"
+        return files
+
+    def load_artifacts(self, src: Path) -> dict:
+        """Inverse of :meth:`save_artifacts` — returns the same dict
+        shape that :meth:`fit` emits, plus ``input_spec`` if persisted.
+        """
+        from safetensors.torch import load_file
+
+        from intelligence.ml.artifact.sidecars import (
+            load_input_spec,
+            load_json,
+            load_sklearn_scaler,
+        )
+        from intelligence.ml.trainers.lstm import LSTMModel
+
+        arch = load_json(src, "arch.json")
+        network = LSTMModel(
+            input_size=int(arch["input_size"]),
+            hidden_size=int(arch["hidden_size"]),
+            output_size=int(arch["output_size"]),
+        )
+        network.load_state_dict(load_file(str(src / "lstm.safetensors")))
+        network.eval()
+
+        loaded: dict[str, Any] = {
+            "network": network,
+            "scaler_obj": load_sklearn_scaler(src, "scaler"),
+            "look_back": int(arch["look_back"]),
+            "num_variables": int(arch["num_variables"]),
+            "input_size": int(arch["input_size"]),
+            "hidden_size": int(arch["hidden_size"]),
+            "output_size": int(arch["output_size"]),
+            "horizon": int(arch["output_size"]),
+            "model_metrics": load_json(src, "metrics.json"),
+        }
+        if (src / "input_spec.json").exists():
+            loaded["input_spec"] = load_input_spec(src)
+        return loaded
 
     def predict(
         self,
-        bento_model: Any,
+        artifacts: dict,
         input_series: dict[str, list[float]],
         horizon: int = 1,
     ) -> list[ForecastPoint]:
@@ -103,13 +184,11 @@ class LstmModel:
         if not input_series:
             raise ValueError("input_series is empty")
 
-        look_back = int(bento_model.custom_objects["look_back"])
-        num_variables = int(bento_model.custom_objects["num_variables"])
-        scaler = bento_model.custom_objects["scaler_obj"]
+        look_back = int(artifacts["look_back"])
+        num_variables = int(artifacts["num_variables"])
+        scaler = artifacts["scaler_obj"]
         trained_horizon = int(
-            bento_model.custom_objects.get(
-                "horizon", bento_model.custom_objects.get("output_size", 1)
-            )
+            artifacts.get("horizon", artifacts.get("output_size", 1))
         )
 
         if horizon > trained_horizon:
@@ -134,7 +213,7 @@ class LstmModel:
         scaled = scaler.transform(window)  # (look_back, num_variables)
         x = torch.from_numpy(scaled).float().unsqueeze(0)  # (1, look_back, num_variables)
 
-        net = bento_model.load_model()  # actual nn.Module
+        net = artifacts["network"]
         net.eval()
         with torch.no_grad():
             y_scaled = net(x).cpu().numpy()  # (1, trained_horizon * num_variables)

@@ -1,30 +1,36 @@
-"""Hugging Face Hub push/pull for local Bento models.
+"""Hugging Face Hub push/pull for local manifest-described artefacts.
 
 The HF token is read from ``HF_TOKEN`` at call time — never persisted
 in config files or class state. A missing token raises
 ``PermissionError`` so the API translates it to HTTP 401.
 
-Pulled artifacts are re-saved via ``bentoml.picklable_model`` regardless
-of their original framework. The new tree saves models through
-``picklable_model`` consistently (see ``ml/models/*``), so this keeps
-the local store homogeneous and lets ``BaseTask._load_bento`` find them
-without framework-specific dispatch.
+Pulled artefacts are validated against the manifest schema and the
+per-directory filename allowlist *before any file is opened*. There
+is no ``pickle.load`` on the pull path — pulled artefacts are
+framework-native files (``.ubj`` / ``.safetensors`` / ``.parquet``)
+plus typed JSON sidecars. A pulled artefact that lacks ``input_spec``
+is still refused at predict time by ``BaseTask._verify_artifact``
+unless ``allow_unverified_models=True``.
 
-Operationally, a pulled Bento that lacks ``input_spec`` in its
-``custom_objects`` is treated as **unverified** by ``BaseTask._verify_bento``
-(see plan §3.5) — the predict path refuses it unless
-``allow_unverified_models=True``.
+Push goes the other way: the local artefact directory is re-validated
+against its manifest before upload, so a corrupted local artefact
+won't propagate to the remote repo.
 """
 
 from __future__ import annotations
 
 import logging
 import os
-import pickle
 import tempfile
 from pathlib import Path
 
 from huggingface_hub import HfApi, snapshot_download
+
+from intelligence.ml.artifact import import_artifact
+from intelligence.ml.artifact.manifest import (
+    read_manifest,
+    validate_artifact_directory,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -41,12 +47,15 @@ def push_to_hf(
     repo_id: str,
     commit_message: str | None = None,
 ) -> str:
-    """Upload the local Bento's folder to ``repo_id`` on Hugging Face.
+    """Upload a local manifest-described artefact directory to ``repo_id``.
 
-    The whole Bento directory (model file, ``custom_objects.pkl``,
-    metadata) is uploaded under the model's tag-named subdirectory.
+    The whole artefact directory (manifest + native model file +
+    typed sidecars) is uploaded under
+    ``{tag.name}/{tag.version}/``. Before upload we re-validate the
+    directory against its manifest — a corrupt local artefact won't
+    propagate to the remote repo.
 
-    Returns the local Bento tag (unchanged by push).
+    Returns the local tag (unchanged by push).
     """
     token = _require_token()
 
@@ -55,7 +64,11 @@ def push_to_hf(
     bento = bentoml.models.get(model_tag)
     folder = Path(bento.path)
     if not folder.exists():
-        raise FileNotFoundError(f"local Bento folder missing: {folder}")
+        raise FileNotFoundError(f"local artefact folder missing: {folder}")
+
+    # Re-validate before publishing — refuses to upload a corrupt artefact.
+    manifest = read_manifest(folder)
+    validate_artifact_directory(folder, manifest)
 
     api = HfApi(token=token)
     api.upload_folder(
@@ -70,21 +83,21 @@ def push_to_hf(
 
 
 def pull_from_hf(model_tag: str, repo_id: str) -> str:
-    """Download ``{name}/{version}/`` from ``repo_id`` and re-save locally
-    via ``bentoml.picklable_model``. Returns the new local tag.
+    """Download ``{name}/{version}/`` from ``repo_id`` and import into
+    the local store under a fresh tag.
 
-    The model itself is loaded from ``saved_model.pkl``; any
-    ``custom_objects.pkl`` alongside is unpickled and re-attached.
-    Frameworks other than the pickle-able family are out of scope —
-    they were dropped along with the NKUA tasks in phase 2 §3.1.
+    The manifest is parsed and the artefact directory is validated
+    against the per-directory filename allowlist *before any file is
+    opened*. Manifests with the wrong schema version, hostile filenames
+    (traversal, hidden, executable extensions), or stowaway files in
+    the directory are refused before ``import_artifact`` runs. There
+    is no ``pickle.load`` on this path — by design.
     """
     token = _require_token()
 
     if ":" not in model_tag:
         raise ValueError(f"model_tag must be 'name:version', got {model_tag!r}")
     name, version = model_tag.split(":", 1)
-
-    import bentoml
 
     with tempfile.TemporaryDirectory() as tmp:
         tmp_path = Path(tmp)
@@ -96,25 +109,16 @@ def pull_from_hf(model_tag: str, repo_id: str) -> str:
             token=token,
         )
         artifact_dir = tmp_path / name / version
-        saved = artifact_dir / "saved_model.pkl"
-        if not saved.exists():
+        if not artifact_dir.exists():
             raise FileNotFoundError(
-                f"snapshot for {model_tag} missing saved_model.pkl (looked in {artifact_dir})"
+                f"snapshot for {model_tag} missing in repo (looked in {artifact_dir})"
             )
 
-        with saved.open("rb") as f:
-            obj = pickle.load(f)
+        # The manifest is the security boundary. Parse + validate
+        # before any file is opened for processing.
+        manifest = read_manifest(artifact_dir)
+        validate_artifact_directory(artifact_dir, manifest)
 
-        custom_objects: dict = {}
-        custom_path = artifact_dir / "custom_objects.pkl"
-        if custom_path.exists():
-            with custom_path.open("rb") as f:
-                custom_objects = pickle.load(f)
-
-        bento = bentoml.picklable_model.save_model(
-            name,
-            obj,
-            custom_objects=custom_objects,
-        )
-        logger.info("pulled %s → local tag %s", model_tag, bento.tag)
-        return str(bento.tag)
+        imported = import_artifact(name, artifact_dir)
+        logger.info("pulled %s → local tag %s", model_tag, imported.tag)
+        return imported.tag

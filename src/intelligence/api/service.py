@@ -45,6 +45,7 @@ from intelligence.api.schemas import (
     TrainRequest,
 )
 from intelligence.config import load_config
+from intelligence.ml.artifact import list_artifacts_by_name
 from intelligence.tasks import TaskRegistry, build_registry_from_config
 
 configure_logging()
@@ -197,21 +198,20 @@ def list_tasks() -> dict:
 
 @app.get("/tasks/{task_name}/versions")
 def list_task_versions(task_name: str) -> dict:
-    """Bento versions stored locally for this task, newest first.
+    """Locally-stored artefact versions for this task, newest first.
 
     Useful for rollback decisions: a client picks a known-good version
-    from this list and sends it as ``model_version`` on the next predict
-    request (or operators set it as ``pinned_version:`` in config).
+    from this list and sends it as ``model_version`` on the next
+    predict request (or operators set it as ``pinned_version:`` in
+    config). Artefacts without a readable manifest (i.e. not produced
+    by this codebase) are filtered out.
     """
     if task_name not in registry:
         raise HTTPException(status_code=404, detail=f"unknown task: {task_name}")
     task = registry.get(task_name)
     bento_name = getattr(task, "bento_name", task_name)
 
-    import bentoml
-
-    matches = [m for m in bentoml.models.list() if m.tag.name == bento_name]
-    matches.sort(key=lambda m: m.info.creation_time, reverse=True)
+    artifacts = list_artifacts_by_name(bento_name)
 
     return {
         "task": task_name,
@@ -219,11 +219,11 @@ def list_task_versions(task_name: str) -> dict:
         "pinned_version": getattr(task, "pinned_version", None),
         "versions": [
             {
-                "tag": str(m.tag),
-                "version": m.tag.version,
-                "created_at": m.info.creation_time.isoformat(),
+                "tag": a.tag,
+                "version": a.version,
+                "created_at": a.created_at,
             }
-            for m in matches
+            for a in artifacts
         ],
     }
 

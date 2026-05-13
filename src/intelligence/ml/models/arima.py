@@ -14,6 +14,7 @@ confidence band — populated into each ``ForecastPoint.lower`` /
 from __future__ import annotations
 
 import logging
+from pathlib import Path
 from typing import Any
 
 import numpy as np
@@ -38,42 +39,108 @@ class ArimaModel:
     def __init__(self, p: int = 5, d: int = 1, q: int = 0) -> None:
         self.default_params = {"p": p, "d": d, "q": q}
 
-    def train(
-        self,
-        components: dict,
-        bento_name: str,
-        extras: dict | None = None,
-    ) -> tuple[Any, dict]:
+    # ---- New manifest-based protocol --------------------------------------
+    #
+    # ``fit`` / ``save_artifacts`` / ``load_artifacts`` all speak the same
+    # ``artifacts`` dict shape — what predict needs at runtime. The legacy
+    # ``train`` / ``predict(bento, ...)`` methods below stay until step 8
+    # flips ``BaseTask`` to call the new path; step 9 then removes them.
+
+    def fit(self, components: dict) -> tuple[dict, dict]:
+        """Train and return ``(artifacts, metrics)``.
+
+        ``artifacts`` carries the runtime state predict consumes: scaler,
+        full history series (after walk-forward), the ARIMA order, and
+        the test sample size. ``BaseTask`` injects ``input_spec`` into
+        this dict before calling ``save_artifacts``.
+        """
         from intelligence.ml.trainers import ModelTrainer
 
         order_params = {**self.default_params, **components.get("model_parameters", {})}
         components_with_params = {**components, "model_parameters": order_params}
 
         trainer = ModelTrainer(components_with_params)
-        metrics, model, history, _y_test, _y_pred = trainer.train_arima()
+        metrics, _model, history, _y_test, _y_pred = trainer.train_arima()
+        metrics_jsonable = _coerce_jsonable(metrics)
 
-        custom_objects = {
+        artifacts = {
             "scaler_obj": components_with_params["scaler_obj"],
-            "historical_data": history,
-            "model_metrics": metrics,
+            "historical_data": list(history),
+            "arima_order": (
+                order_params["p"],
+                order_params["d"],
+                order_params["q"],
+            ),
+            "model_metrics": metrics_jsonable,
             "test_sample_size": len(components_with_params["X_test"]),
-            "arima_order": (order_params["p"], order_params["d"], order_params["q"]),
-            **(extras or {}),
+        }
+        return artifacts, metrics_jsonable
+
+    def save_artifacts(self, artifacts: dict, dest: Path) -> dict[str, str]:
+        """Persist the artefacts as a flat directory and return the
+        ``role -> filename`` map for the manifest.
+
+        ARIMA itself has no native serialisable model — we re-fit on
+        every predict call against the persisted history — so the
+        on-disk model file is just ``arima.json`` (order + history).
+        """
+        from intelligence.ml.artifact.sidecars import (
+            save_input_spec,
+            save_json,
+            save_sklearn_scaler,
+        )
+
+        save_json(
+            dest,
+            "arima.json",
+            {
+                "order": list(artifacts["arima_order"]),
+                "history": list(artifacts["historical_data"]),
+                "test_sample_size": int(artifacts.get("test_sample_size", 0)),
+            },
+        )
+        save_sklearn_scaler(dest, "scaler", artifacts["scaler_obj"])
+        save_json(dest, "metrics.json", artifacts.get("model_metrics", {}))
+
+        files: dict[str, str] = {
+            "model": "arima.json",
+            "scaler_meta": "scaler.json",
+            "scaler_arrays": "scaler.npz",
+            "metrics": "metrics.json",
         }
 
-        import bentoml
+        spec = artifacts.get("input_spec")
+        if spec is not None:
+            save_input_spec(dest, spec)
+            files["input_spec"] = "input_spec.json"
 
-        bento = bentoml.picklable_model.save_model(
-            bento_name,
-            model,
-            custom_objects=custom_objects,
-            signatures={"predict": {"batchable": True}},
+        return files
+
+    def load_artifacts(self, src: Path) -> dict:
+        """Inverse of :meth:`save_artifacts` — returns the same dict
+        shape that :meth:`fit` emits, plus ``input_spec`` if persisted.
+        """
+        from intelligence.ml.artifact.sidecars import (
+            load_input_spec,
+            load_json,
+            load_sklearn_scaler,
         )
-        return bento, _coerce_jsonable(metrics)
+
+        arima_data = load_json(src, "arima.json")
+        loaded: dict[str, Any] = {
+            "scaler_obj": load_sklearn_scaler(src, "scaler"),
+            "historical_data": list(arima_data["history"]),
+            "arima_order": tuple(arima_data["order"]),
+            "model_metrics": load_json(src, "metrics.json"),
+            "test_sample_size": int(arima_data.get("test_sample_size", 0)),
+        }
+        if (src / "input_spec.json").exists():
+            loaded["input_spec"] = load_input_spec(src)
+        return loaded
 
     def predict(
         self,
-        bento_model: Any,
+        artifacts: dict,
         input_series: dict[str, list[float]],
         horizon: int = 1,
     ) -> list[ForecastPoint]:
@@ -84,12 +151,16 @@ class ArimaModel:
         if not values:
             raise ValueError("input_series values are empty")
 
-        scaler = bento_model.custom_objects["scaler_obj"]
-        history = list(bento_model.custom_objects.get("historical_data", []))
+        scaler = artifacts["scaler_obj"]
+        history = list(artifacts.get("historical_data", []))
         order = tuple(
-            bento_model.custom_objects.get(
+            artifacts.get(
                 "arima_order",
-                (self.default_params["p"], self.default_params["d"], self.default_params["q"]),
+                (
+                    self.default_params["p"],
+                    self.default_params["d"],
+                    self.default_params["q"],
+                ),
             )
         )
 

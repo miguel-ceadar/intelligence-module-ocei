@@ -140,14 +140,37 @@ def test_bootstrap_task_runs_train(tmp_path, monkeypatch):
 
     monkeypatch.setenv("BENTOML_HOME", str(tmp_path / "bentoml"))
 
+    fake_model = mock.MagicMock(name="model")
+    fake_model.name = "fake"
+    fake_model.has_drift = False
+    fake_model.fit.return_value = ({"any": "thing"}, {"mae": 0.0})
+    fake_model.save_artifacts.return_value = {"thing": "thing.json"}
+
     task = BaseTask(
         name="t_boot",
-        model=mock.MagicMock(name="model"),
+        model=fake_model,
         data_loader=mock.MagicMock(return_value={"X_train": [[0.0]], "X_test": [[0.0]]}),
     )
-    fake_bento = mock.MagicMock()
-    fake_bento.tag = "t:v1"
-    task.model.train.return_value = (fake_bento, {"mae": 0.0})
+
+    # Stub the artefact store so we don't actually touch the bentoml store.
+    from pathlib import Path
+
+    from intelligence.ml.artifact import SavedArtifact
+    from intelligence.ml.artifact.manifest import Manifest
+
+    saved = SavedArtifact(
+        tag="t_boot:v1",
+        name="t_boot",
+        version="v1",
+        path=Path("/fake"),
+        manifest=Manifest(
+            schema_version=1,
+            kind="fake",
+            created_at="2026-05-13T10:00:00+00:00",
+            files={},
+        ),
+        created_at="2026-05-13T10:00:00+00:00",
+    )
 
     cfg = _cfg_with_bootstrap(
         "t_boot",
@@ -156,10 +179,11 @@ def test_bootstrap_task_runs_train(tmp_path, monkeypatch):
     )
 
     assert task.bootstrap_state == "pending"
-    asyncio.run(bootstrap_task(task, cfg))
+    with mock.patch("intelligence.tasks.base.save_artifact", return_value=saved):
+        asyncio.run(bootstrap_task(task, cfg))
     assert task.bootstrap_state == "complete"
     assert task.bootstrap_error is None
-    task.model.train.assert_called_once()
+    fake_model.fit.assert_called_once()
 
 
 def test_bootstrap_task_records_failure():

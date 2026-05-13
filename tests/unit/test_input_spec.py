@@ -7,8 +7,6 @@ mismatches return 422, not silent garbage from a misaligned scaler.
 
 from __future__ import annotations
 
-import pickle
-
 import pytest
 
 contracts = pytest.importorskip("intelligence.tasks.contracts", reason="phase-1 §2.4 pending")
@@ -74,9 +72,18 @@ def test_input_spec_passes_valid_input():
     spec.validate({"cpu": [0.1, 0.2, 0.3, 0.4, 0.5, 0.6]})  # no exception
 
 
-def test_input_spec_pickle_roundtrip():
-    """BentoML stashes contract objects in ``custom_objects`` via pickle."""
+def test_input_spec_json_roundtrip():
+    """``InputSpec`` is persisted as ``input_spec.json`` via pydantic's
+    JSON round-trip (not pickle). Tuples in ``value_range`` must survive
+    the trip so the predict path can still destructure ``(lo, hi)``."""
     InputSpec = _import_or_skip("InputSpec")
-    spec = InputSpec(n_features=2, feature_names=["a", "b"], steps_back=6)
-    restored = pickle.loads(pickle.dumps(spec))
+    spec = InputSpec(
+        n_features=2,
+        feature_names=["a", "b"],
+        steps_back=6,
+        value_range={"a": (0.0, 1.0)},
+    )
+    restored = InputSpec.model_validate_json(spec.model_dump_json())
     assert restored == spec
+    # Tuple in value_range is preserved (pydantic restores list → tuple).
+    assert restored.value_range["a"] == (0.0, 1.0)

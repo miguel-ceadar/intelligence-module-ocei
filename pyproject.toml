@@ -22,6 +22,7 @@ dependencies = [
   "statsmodels>=0.14.0",
   "xgboost==1.7.6",  # 2.x segfaults on macOS arm64 during numpy interop; pin stays until upstream fixes it
   "torch>=2.5.1",
+  "safetensors>=0.4",  # state_dict persistence for LSTM (pickle-free)
   "huggingface_hub>=0.20",
   "pydantic>=2.11.0",
   "pydantic-settings>=2.0",

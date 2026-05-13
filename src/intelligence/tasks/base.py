@@ -3,8 +3,8 @@
 A ``Task`` (the Protocol) is the contract — anything in the registry has
 ``name``, ``train(req)``, ``predict(req)``, ``is_loaded()``. Most tasks
 will be instances of the concrete ``BaseTask`` dataclass below, which
-composes ``(data_loader, model)`` and handles the lifecycle —
-caching, lazy load, readiness probing, request glue.
+composes ``(data_loader, model)`` and handles the lifecycle — caching,
+lazy load, readiness probing, request glue.
 
 If a task type ever needs different lifecycle (e.g. anomaly tasks want
 a custom drift wiring), subclass ``BaseTask`` and override the relevant
@@ -28,6 +28,7 @@ from intelligence.api.schemas import (
     TrainRequest,
     TrainResponse,
 )
+from intelligence.ml.artifact import get_artifact_by_tag, save_artifact
 from intelligence.ml.models import Model
 from intelligence.tasks.contracts import InputSpec
 
@@ -105,44 +106,44 @@ def _safely(fn) -> bool:
 class BaseTask:
     """Generic task: composes a data loader with a model.
 
-    Works for any (task domain x model algorithm) pairing — forecast,
+    Works for any (task domain × model algorithm) pairing — forecast,
     anomaly, classification — as long as the model and loader follow
     their contracts. Subclass only when a task type needs different
     lifecycle (e.g. a custom drift method); don't subclass for naming.
 
     Attributes:
         name: URL segment under ``/tasks/{name}/...``.
-        model: train/predict implementation for one ML algorithm.
-        data_loader: maps a ``StaticDataSource`` to training components.
-        bento_name: BentoML storage key. Defaults to ``name``; override
-            only to share a Bento name with legacy code.
+        model: the per-algorithm implementation of the ``Model``
+            protocol (``fit`` / ``save_artifacts`` / ``load_artifacts``
+            / ``predict``).
+        data_loader: maps a ``DataSource`` to training components.
+        bento_name: artefact-store key. Defaults to ``name``; override
+            only to share a name with legacy code.
     """
 
     name: str
-    # ``model`` is the per-algorithm ``train`` + ``predict`` implementation.
-    # Optional because subclasses (e.g. ``DriftDetectionTask``) may
-    # override both lifecycle methods and not use a Model at all.
+    # ``model`` is the per-algorithm Model implementation. Optional
+    # because subclasses (e.g. ``DriftDetectionTask``) override both
+    # train and predict and don't use a Model at all.
     model: Model | None
     data_loader: Callable[[DataSource], dict]
     bento_name: str | None = None
     input_spec: InputSpec | None = None
-    # When True, predict serves Bentos whose stored input_spec is missing
-    # or doesn't match the task's spec. Default False — pulled/pretrained
-    # Bentos that predate the contract are refused. Override for
-    # debugging or accepted-risk situations.
+    # When True, predict serves artefacts whose stored input_spec is
+    # missing or doesn't match the task's spec. Default False — pulled
+    # artefacts that predate the contract are refused.
     allow_unverified_models: bool = False
-    # Pin this task's predict path to a specific Bento version. Useful
-    # for staged rollouts or rolling back a bad model without touching
-    # client code. A request's ``model_version`` overrides this.
+    # Pin this task's predict path to a specific version. A request's
+    # ``model_version`` overrides this.
     pinned_version: str | None = None
-    # Cache resolved Bentos by version string. ``"latest"`` is invalidated
-    # on each train (a new train shifts what ``latest`` means); pinned
-    # versions are immutable once written, so their cache entries stay.
-    _cached_bentos: dict[str, Any] = field(default_factory=dict, init=False, repr=False)
+    # Cache resolved artefacts by version string, holding ``(loaded_dict,
+    # served_tag)``. ``"latest"`` is invalidated on each train (a new
+    # train shifts what ``latest`` means); pinned versions are immutable
+    # so their cache entries stay valid.
+    _cached_artifacts: dict[str, tuple[dict, str]] = field(
+        default_factory=dict, init=False, repr=False
+    )
     # Bootstrap-on-startup state (see ``intelligence.tasks.bootstrap``).
-    # ``pending`` is the initial state; the coroutine flips it to
-    # ``running`` → ``complete`` / ``failed``. ``/readyz`` only blocks
-    # when a configured-as-bootstrap task is not yet ``complete``.
     bootstrap_state: str = field(default="pending", init=False, repr=False)
     bootstrap_error: str | None = field(default=None, init=False, repr=False)
 
@@ -159,7 +160,7 @@ class BaseTask:
         return bool(getattr(self.model, "has_drift", False)) if self.model is not None else False
 
     def is_loaded(self) -> bool:
-        return bool(self._cached_bentos)
+        return bool(self._cached_artifacts)
 
     def is_ready(self) -> tuple[bool, str]:
         """Readiness probe — delegates to the data_loader if it has one."""
@@ -177,82 +178,97 @@ class BaseTask:
         """Resolve the version to load. Precedence: request → task pin → latest."""
         return requested or self.pinned_version or "latest"
 
-    def _load_bento(self, version: str | None = None) -> Any:
-        resolved = self._resolve_version(version)
-        if resolved in self._cached_bentos:
-            return self._cached_bentos[resolved]
-        import bentoml
+    def _load_artifact(
+        self, version: str | None = None
+    ) -> tuple[dict | None, str | None]:
+        """Resolve a version and load its artefact into a dict.
 
-        try:
-            bento = bentoml.picklable_model.get(f"{self.bento_name}:{resolved}")
-        except bentoml.exceptions.NotFound:
-            return None
-        self._cached_bentos[resolved] = bento
-        return bento
+        Returns ``(loaded_dict, served_tag)`` on success, or
+        ``(None, None)`` when the artefact isn't in the local store.
+        The loaded dict is cached by the resolved version; ``latest``
+        is invalidated by :meth:`_invalidate` whenever ``train`` runs.
+        """
+        resolved = self._resolve_version(version)
+        if resolved in self._cached_artifacts:
+            return self._cached_artifacts[resolved]
+        saved = get_artifact_by_tag(f"{self.bento_name}:{resolved}")
+        if saved is None:
+            return None, None
+        loaded = self.model.load_artifacts(saved.path)
+        self._cached_artifacts[resolved] = (loaded, saved.tag)
+        return loaded, saved.tag
 
     def _invalidate(self) -> None:
         # A new train only shifts what ``:latest`` means; pinned versions
         # are immutable so their cache entries stay valid.
-        self._cached_bentos.pop("latest", None)
+        self._cached_artifacts.pop("latest", None)
 
     def train(self, req: TrainRequest) -> TrainResponse:
         # Descriptor dispatch is the loader's job — wrong kind raises
         # ValueError inside ``data_loader``, which the API translates to 422.
         components = self.data_loader(req.data_source)
         components["model_parameters"] = req.model_parameters
-        # Inject the input_spec into the saved Bento's custom_objects so
-        # the contract travels with the model — see plan §2.4.
-        extras = {"input_spec": self.input_spec} if self.input_spec is not None else None
-        bento, metrics = self.model.train(components, self.bento_name, extras)
+
+        artifacts, metrics = self.model.fit(components)
+        if self.input_spec is not None:
+            artifacts["input_spec"] = self.input_spec
+
+        kind = getattr(self.model, "name", "unknown")
+        saved = save_artifact(
+            self.bento_name,
+            kind,
+            lambda dest: self.model.save_artifacts(artifacts, dest),
+        )
         self._invalidate()
-        return TrainResponse(model_tag=str(bento.tag), metrics=metrics)
+        return TrainResponse(model_tag=saved.tag, metrics=metrics)
 
     def predict(self, req: PredictRequest) -> PredictResponse:
-        # Validate request against the contract BEFORE loading the bento —
-        # cheap rejection of obviously-bad requests, no Bento fetch needed.
+        # Validate request against the contract BEFORE loading the
+        # artefact — cheap rejection of obviously-bad requests, no
+        # store fetch needed.
         if self.input_spec is not None:
             self.input_spec.validate(req.input_series)
             self.input_spec.validate_horizon(req.horizon)
 
-        bento = self._load_bento(version=req.model_version)
-        if bento is None:
+        loaded, served_tag = self._load_artifact(version=req.model_version)
+        if loaded is None:
             resolved = self._resolve_version(req.model_version)
             raise FileNotFoundError(
                 f"no Bento {self.bento_name}:{resolved} in the local store; "
                 f"POST /tasks/{self.name}/train first, or pin to an existing version"
             )
-        self._verify_bento(bento)
-        prediction = self.model.predict(bento, req.input_series, horizon=req.horizon)
-        served = str(getattr(bento, "tag", "")).split(":")[-1] or None
+        self._verify_artifact(loaded)
+        prediction = self.model.predict(loaded, req.input_series, horizon=req.horizon)
+        served = str(served_tag).split(":")[-1] if served_tag else None
         return PredictResponse(prediction=prediction, model_version=served)
 
-    def _verify_bento(self, bento: Any) -> None:
-        """Refuse predict if the loaded Bento's stored contract doesn't
-        match this task's ``input_spec``.
+    def _verify_artifact(self, loaded: dict) -> None:
+        """Refuse predict if the loaded artefact's stored contract
+        doesn't match this task's ``input_spec``.
 
-        The contract is what was written to ``custom_objects['input_spec']``
-        at train time (see ``BaseTask.train`` → ``Model.train(..., extras)``).
-        Pulled HF Bentos from before the contract existed have no
+        The contract is what was written to ``input_spec.json`` at
+        train time (see :meth:`train` → ``model.save_artifacts``).
+        Pulled artefacts from before the contract existed have no
         ``input_spec`` and are refused by default.
 
-        ``allow_unverified_models=True`` downgrades refusal to a warning.
-        Operationally a refusal is the same shape as "no trained model"
-        (503 from the API), so the caller knows to train fresh or pull
-        a matching Bento.
+        ``allow_unverified_models=True`` downgrades refusal to a
+        warning. Operationally a refusal is the same shape as "no
+        trained model" (503 from the API), so the caller knows to
+        train fresh or pull a matching artefact.
         """
         if self.input_spec is None:
             return  # task has no contract to verify against
 
-        stored = getattr(bento, "custom_objects", {}).get("input_spec")
+        stored = loaded.get("input_spec")
         if stored is None:
             if self.allow_unverified_models:
                 logger.warning(
-                    "task %s: serving unverified Bento (no input_spec in custom_objects)",
+                    "task %s: serving unverified artefact (no input_spec)",
                     self.name,
                 )
                 return
             raise FileNotFoundError(
-                f"unverified Bento for task {self.name!r}: stored model has no "
+                f"unverified Bento for task {self.name!r}: stored artefact has no "
                 f"input_spec (saved before the contract existed). Train a fresh "
                 f"model or set allow_unverified_models=true (debugging only)."
             )
@@ -261,7 +277,7 @@ class BaseTask:
         if mismatch is not None:
             if self.allow_unverified_models:
                 logger.warning(
-                    "task %s: serving Bento with mismatched input_spec (%s)",
+                    "task %s: serving artefact with mismatched input_spec (%s)",
                     self.name,
                     mismatch,
                 )
@@ -272,40 +288,20 @@ class BaseTask:
             )
 
 
-def _spec_fields(spec: Any) -> tuple[int | None, list[str] | None, int | None]:
-    """Extract ``(n_features, feature_names, steps_back)`` from either an
-    ``InputSpec`` instance or a plain dict (older Bentos may have pickled
-    the spec as a dict).
-    """
-    if isinstance(spec, dict):
-        return (
-            spec.get("n_features"),
-            list(spec["feature_names"]) if spec.get("feature_names") is not None else None,
-            spec.get("steps_back"),
-        )
-    return (
-        getattr(spec, "n_features", None),
-        list(getattr(spec, "feature_names", []) or []) or None,
-        getattr(spec, "steps_back", None),
-    )
+def _spec_mismatch(stored: InputSpec, expected: InputSpec) -> str | None:
+    """Return a short description of the first structural field that
+    doesn't match, or ``None`` if all three agree.
 
-
-def _spec_mismatch(stored: Any, expected: InputSpec) -> str | None:
-    """Return a short description of the first field that doesn't match,
-    or ``None`` if all structural fields agree.
-
-    Only the three fields that affect tensor shape are compared —
+    Only the fields that affect tensor shape are compared —
     ``n_features``, ``feature_names``, ``steps_back``. ``value_range``
     and ``units`` are descriptive and don't block.
     """
-    s_n, s_names, s_back = _spec_fields(stored)
-    e_n, e_names, e_back = _spec_fields(expected)
-    if s_n != e_n:
-        return f"n_features {s_n} != {e_n}"
-    if s_names != e_names:
-        return f"feature_names {s_names} != {e_names}"
-    if s_back != e_back:
-        return f"steps_back {s_back} != {e_back}"
+    if stored.n_features != expected.n_features:
+        return f"n_features {stored.n_features} != {expected.n_features}"
+    if list(stored.feature_names) != list(expected.feature_names):
+        return f"feature_names {list(stored.feature_names)} != {list(expected.feature_names)}"
+    if stored.steps_back != expected.steps_back:
+        return f"steps_back {stored.steps_back} != {expected.steps_back}"
     return None
 
 

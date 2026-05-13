@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Callable
+from pathlib import Path
 from typing import Any
 
 import numpy as np
@@ -45,42 +46,120 @@ class XgbModel:
             "eta": 0.1,
         }
 
-    def train(
-        self,
-        components: dict,
-        bento_name: str,
-        extras: dict | None = None,
-    ) -> tuple[Any, dict]:
+    # ---- New manifest-based protocol --------------------------------------
+
+    def fit(self, components: dict) -> tuple[dict, dict]:
+        """Train and return ``(artifacts, metrics)``.
+
+        ``artifacts`` carries the runtime state predict consumes: the
+        fitted ``XGBRegressor``, both scalers (X and y), and the
+        sliding-window length. ``BaseTask`` injects ``input_spec`` into
+        this dict before calling ``save_artifacts``.
+        """
         from intelligence.ml.trainers import ModelTrainer
 
         params = {**self.default_params, **components.get("model_parameters", {})}
         components_with_params = {**components, "model_parameters": params}
 
         trainer = ModelTrainer(components_with_params)
-        metrics, model = trainer.train_xgb()
+        metrics, regressor = trainer.train_xgb()
+        metrics_jsonable = _coerce_jsonable(metrics)
 
-        custom_objects = {
+        artifacts = {
+            "regressor": regressor,
             "scaler_obj": components_with_params["scaler_obj"],  # y-scaler
-            "scaler_X": components_with_params["scaler_X"],  # X-scaler — needed by predict
+            "scaler_X": components_with_params["scaler_X"],
             "look_back": components_with_params["look_back"],
-            "model_metrics": metrics,
+            "model_metrics": metrics_jsonable,
             "test_sample_size": len(components_with_params["X_test"]),
-            **(extras or {}),
         }
+        return artifacts, metrics_jsonable
 
-        import bentoml
+    def save_artifacts(self, artifacts: dict, dest: Path) -> dict[str, str]:
+        """Persist the artefacts as a flat directory and return the
+        ``role -> filename`` map for the manifest.
 
-        bento = bentoml.picklable_model.save_model(
-            bento_name,
-            model,
-            custom_objects=custom_objects,
-            signatures={"predict": {"batchable": True}},
+        The model itself goes to ``xgb.ubj`` via xgboost's native
+        universal binary JSON format — bit-exact round-trip without
+        pickle. Both scalers persist as JSON + NPZ sidecars.
+        """
+        from intelligence.ml.artifact.sidecars import (
+            save_input_spec,
+            save_json,
+            save_sklearn_scaler,
         )
-        return bento, _coerce_jsonable(metrics)
+
+        regressor = artifacts["regressor"]
+        # xgboost 1.7.6 (pinned, see pyproject for the reason) calls
+        # ``_get_type()`` during save; sklearn 1.8 removed
+        # ``_estimator_type`` from ``RegressorMixin`` so the attribute
+        # isn't inherited any more. Set it explicitly — harmless on
+        # older sklearn, fixes the save on newer sklearn.
+        if not hasattr(regressor, "_estimator_type"):
+            regressor._estimator_type = "regressor"
+        regressor.save_model(str(dest / "xgb.ubj"))
+
+        save_sklearn_scaler(dest, "scaler_x", artifacts["scaler_X"])
+        save_sklearn_scaler(dest, "scaler_y", artifacts["scaler_obj"])
+        save_json(
+            dest,
+            "xgb_meta.json",
+            {
+                "look_back": int(artifacts["look_back"]),
+                "test_sample_size": int(artifacts.get("test_sample_size", 0)),
+            },
+        )
+        save_json(dest, "metrics.json", artifacts.get("model_metrics", {}))
+
+        files: dict[str, str] = {
+            "model": "xgb.ubj",
+            "scaler_x_meta": "scaler_x.json",
+            "scaler_x_arrays": "scaler_x.npz",
+            "scaler_y_meta": "scaler_y.json",
+            "scaler_y_arrays": "scaler_y.npz",
+            "meta": "xgb_meta.json",
+            "metrics": "metrics.json",
+        }
+        spec = artifacts.get("input_spec")
+        if spec is not None:
+            save_input_spec(dest, spec)
+            files["input_spec"] = "input_spec.json"
+        return files
+
+    def load_artifacts(self, src: Path) -> dict:
+        """Inverse of :meth:`save_artifacts` — returns the same dict
+        shape that :meth:`fit` emits, plus ``input_spec`` if persisted.
+        """
+        from xgboost import XGBRegressor
+
+        from intelligence.ml.artifact.sidecars import (
+            load_input_spec,
+            load_json,
+            load_sklearn_scaler,
+        )
+
+        regressor = XGBRegressor()
+        # See ``save_artifacts`` — same xgboost-1.7.6 / sklearn-1.8 quirk.
+        if not hasattr(regressor, "_estimator_type"):
+            regressor._estimator_type = "regressor"
+        regressor.load_model(str(src / "xgb.ubj"))
+
+        meta = load_json(src, "xgb_meta.json")
+        loaded: dict[str, Any] = {
+            "regressor": regressor,
+            "scaler_obj": load_sklearn_scaler(src, "scaler_y"),
+            "scaler_X": load_sklearn_scaler(src, "scaler_x"),
+            "look_back": int(meta["look_back"]),
+            "model_metrics": load_json(src, "metrics.json"),
+            "test_sample_size": int(meta.get("test_sample_size", 0)),
+        }
+        if (src / "input_spec.json").exists():
+            loaded["input_spec"] = load_input_spec(src)
+        return loaded
 
     def predict(
         self,
-        bento_model: Any,
+        artifacts: dict,
         input_series: dict[str, list[float]],
         horizon: int = 1,
     ) -> list[ForecastPoint]:
@@ -93,14 +172,14 @@ class XgbModel:
             raise ValueError("input_series is empty")
         # Univariate — pick the first series.
         _key, values = next(iter(input_series.items()))
-        look_back = int(bento_model.custom_objects["look_back"])
+        look_back = int(artifacts["look_back"])
         if len(values) < look_back:
             raise ValueError(f"need at least {look_back} observations, got {len(values)}")
 
-        scaler_x = bento_model.custom_objects["scaler_X"]
-        scaler_y = bento_model.custom_objects["scaler_obj"]
+        scaler_x = artifacts["scaler_X"]
+        scaler_y = artifacts["scaler_obj"]
         cols = getattr(scaler_x, "feature_names_in_", None)
-        regressor = bento_model.load_model()
+        regressor = artifacts["regressor"]
 
         window = [float(v) for v in values[-look_back:]]
         forecasts: list[float] = []

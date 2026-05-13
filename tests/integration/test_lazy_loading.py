@@ -15,50 +15,35 @@ import pytest
 pytestmark = pytest.mark.integration
 
 
-def test_importing_api_does_not_load_any_bento_models():
-    """Sniff ``bentoml.<framework>.get`` for the duration of the import."""
-    bentoml = pytest.importorskip("bentoml")
+def test_importing_api_does_not_load_any_artefacts():
+    """Importing ``intelligence.api.service`` must not call
+    ``get_artifact_by_tag`` — every task defers its artefact load until
+    first predict. That's the change that drops cold-start RAM from
+    ~40 GB to task-by-task.
+    """
+    pytest.importorskip("intelligence.api")
 
-    # Force ``intelligence.api.service`` to re-execute its module body so
-    # the bentoml.get patches below actually see the calls (if any).
-    # Only the service module — purging ``intelligence.api.schemas`` too
-    # would replace ``PrometheusDataSource`` / ``StaticDataSource`` with
+    # Force ``intelligence.api.service`` to re-execute its module body
+    # so the patch below actually sees the calls (if any). Only the
+    # service module — purging ``intelligence.api.schemas`` too would
+    # replace ``PrometheusDataSource`` / ``StaticDataSource`` with
     # fresh classes, breaking ``isinstance`` checks in code that already
     # imported them (e.g. ``intelligence.tasks.loaders``).
     sys.modules.pop("intelligence.api.service", None)
 
-    patches = []
-    calls: list[str] = []
+    calls: list[tuple] = []
 
-    for fw in ("sklearn", "xgboost", "picklable_model", "pytorch", "keras"):
-        # BentoML framework modules are lazy proxies — they import their
-        # underlying lib on first attribute access, and raise
-        # MissingDependencyException if that lib isn't installed (e.g.
-        # keras without tensorflow). Skip cleanly when that happens.
+    with mock.patch(
+        "intelligence.tasks.base.get_artifact_by_tag",
+        side_effect=lambda *a, **kw: calls.append(("get_artifact_by_tag", a, kw)),
+    ):
         try:
-            sub = getattr(bentoml, fw, None)
-            if sub is None or not hasattr(sub, "get"):
-                continue
-            p = mock.patch.object(
-                sub,
-                "get",
-                side_effect=lambda *a, _fw=fw, **kw: calls.append(f"{_fw}.get({a!r})"),
-            )
-        except Exception:
-            continue
-        patches.append(p)
-        p.start()
-
-    try:
-        importlib.import_module("intelligence.api.service")
-    except ModuleNotFoundError:
-        pytest.skip("intelligence.api.service not implemented yet")
-    finally:
-        for p in patches:
-            p.stop()
+            importlib.import_module("intelligence.api.service")
+        except ModuleNotFoundError:
+            pytest.skip("intelligence.api.service not implemented yet")
 
     assert not calls, (
-        f"Importing intelligence.api.service triggered eager BentoML model loads: {calls}. "
+        f"Importing intelligence.api.service triggered eager artefact loads: {calls}. "
         "Move them inside the per-task lazy initializer."
     )
 
