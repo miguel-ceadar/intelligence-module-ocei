@@ -1,27 +1,13 @@
-"""Manifest-based artefact persistence — the pickle-free replacement for
-``bentoml.picklable_model``.
+"""Manifest-based artifact persistence.
 
-Each saved artefact is a flat directory containing a self-describing
-``manifest.json`` (kind + ``files: {role: filename}`` map), one or more
-framework-native model files, typed sidecars, and the bentoml-generated
-``model.yaml``. Adding a new model kind requires no edits to this
-package — the kind writes whatever files it needs and declares them in
-the manifest it commits.
+Each saved artifact is a flat directory containing a ``manifest.json``
+(kind + ``files: {role: filename}`` map), one or more framework-native
+model files, typed sidecars, and the bentoml-generated ``model.yaml``.
+A new model kind writes whatever files it needs and declares them in
+the manifest it commits — no edits to this package required.
 
-Public surface (use these; avoid reaching into submodules):
-
-    from intelligence.ml.artifact import (
-        SavedArtifact,
-        save_artifact,
-        get_artifact_by_tag,
-        list_artifacts_by_name,
-        import_artifact,
-        Manifest,
-        ManifestError,
-    )
-
-Per-kind model classes additionally import from
-``intelligence.ml.artifact.sidecars`` for the typed save/load helpers.
+Per-kind model classes import helpers from
+``intelligence.ml.artifact.sidecars`` for typed save/load.
 """
 
 from __future__ import annotations

@@ -1,14 +1,9 @@
-"""ARIMA model.
+"""ARIMA model implementing the ``Model`` protocol.
 
-Wraps ``ModelTrainer.train_arima`` for the ``Model`` contract. The
-Bento's ``custom_objects`` carry the fitted scaler, the historical
-training series, and per-task metrics so ``predict`` can refit
-against the stored prior plus the new observation.
-
-Multi-horizon forecasts come straight from statsmodels'
-``get_forecast(steps=N).summary_frame()``, which also exposes the 95 %
-confidence band — populated into each ``ForecastPoint.lower`` /
-``upper``.
+Predict refits the ARIMA against the persisted history plus the new
+observation. Multi-horizon forecasts come from statsmodels'
+``get_forecast(steps=N).summary_frame()``, which also provides the
+95 % confidence band populated into each ``ForecastPoint``.
 """
 
 from __future__ import annotations
@@ -25,12 +20,10 @@ logger = logging.getLogger(__name__)
 
 
 class ArimaModel:
-    """ARIMA model.
+    """ARIMA forecaster.
 
-    Defaults are *per-instance*: two registered tasks both using ARIMA
-    can carry different baseline orders (e.g. ``cpu_forecast_arima``
-    with ``p=5`` and ``mem_forecast_arima`` with ``p=3``) without
-    subclassing or per-request overrides.
+    Defaults are per-instance, so two registered tasks both using
+    ARIMA can carry different baseline orders without subclassing.
     """
 
     name = "arima"
@@ -39,20 +32,10 @@ class ArimaModel:
     def __init__(self, p: int = 5, d: int = 1, q: int = 0) -> None:
         self.default_params = {"p": p, "d": d, "q": q}
 
-    # ---- New manifest-based protocol --------------------------------------
-    #
-    # ``fit`` / ``save_artifacts`` / ``load_artifacts`` all speak the same
-    # ``artifacts`` dict shape — what predict needs at runtime. The legacy
-    # ``train`` / ``predict(bento, ...)`` methods below stay until step 8
-    # flips ``BaseTask`` to call the new path; step 9 then removes them.
-
     def fit(self, components: dict) -> tuple[dict, dict]:
-        """Train and return ``(artifacts, metrics)``.
-
-        ``artifacts`` carries the runtime state predict consumes: scaler,
-        full history series (after walk-forward), the ARIMA order, and
-        the test sample size. ``BaseTask`` injects ``input_spec`` into
-        this dict before calling ``save_artifacts``.
+        """Train and return ``(artifacts, metrics)``. ``artifacts``
+        carries the scaler, the walk-forward history series, the
+        ARIMA order, and the test sample size.
         """
         from intelligence.ml.trainers import ModelTrainer
 
@@ -77,12 +60,10 @@ class ArimaModel:
         return artifacts, metrics_jsonable
 
     def save_artifacts(self, artifacts: dict, dest: Path) -> dict[str, str]:
-        """Persist the artefacts as a flat directory and return the
-        ``role -> filename`` map for the manifest.
+        """Persist the artifacts and return the ``role -> filename`` map.
 
-        ARIMA itself has no native serialisable model — we re-fit on
-        every predict call against the persisted history — so the
-        on-disk model file is just ``arima.json`` (order + history).
+        ARIMA refits on every predict call, so the on-disk model file
+        is just ``arima.json`` (order + history).
         """
         from intelligence.ml.artifact.sidecars import (
             save_input_spec,
@@ -117,8 +98,8 @@ class ArimaModel:
         return files
 
     def load_artifacts(self, src: Path) -> dict:
-        """Inverse of :meth:`save_artifacts` — returns the same dict
-        shape that :meth:`fit` emits, plus ``input_spec`` if persisted.
+        """Restore the dict shape ``fit`` emits, plus ``input_spec``
+        if it was persisted.
         """
         from intelligence.ml.artifact.sidecars import (
             load_input_spec,
@@ -170,7 +151,7 @@ class ArimaModel:
         history.append(last_scaled)
         fit = ARIMA(history, order=order).fit()
 
-        # 95 % CI is what statsmodels returns by default (alpha=0.05).
+        # alpha=0.05 → 95 % CI.
         frame = fit.get_forecast(steps=horizon).summary_frame(alpha=0.05)
         mean_raw = scaler.inverse_transform(frame["mean"].to_numpy().reshape(-1, 1)).flatten()
         lower_raw = scaler.inverse_transform(

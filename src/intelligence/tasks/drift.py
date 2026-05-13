@@ -1,21 +1,14 @@
-"""Drift detection — a ``BaseTask`` subclass that fits a NannyML
-``UnivariateDriftCalculator`` on reference data and flags drift on
-fresh chunks.
+"""Input-data drift detection via NannyML's ``UnivariateDriftCalculator``.
 
-Scope (phase 2): **input-data drift**. The calculator is fit on the
-feature distribution at train time. At predict time, it's applied to
-an input chunk; ``prediction = {"drift_detected": bool, ...}``.
+The calculator is fit on the reference distribution at train time
+and applied to an input chunk at predict time, returning
+``{"drift_detected": bool, ...}``.
 
-The ``forecaster_task_name`` field carries the identity of the
-forecaster this drift task is paired with. It's used in the registered
-task name and stored in the Bento so an operator can trace the link.
-At this stage we do not load the forecaster's Bento — so drift task
-training is independent of whether the forecaster has been trained.
-A future extension (prediction-drift) can pull the forecaster Bento
-at train time to score the reference data first.
+``forecaster_task_name`` records which forecaster this drift task is
+paired with; it's stored alongside the artifact for traceability.
 
-The prepare callable must yield ``{"reference_df": pd.DataFrame,
-"drift_columns": list[str]}``. Use ``make_drift_prepare`` for the
+The ``prepare`` callable must yield ``{"reference_df": pd.DataFrame,
+"drift_columns": list[str]}``. ``make_drift_prepare`` produces the
 default univariate shape.
 """
 
@@ -42,38 +35,25 @@ logger = logging.getLogger(__name__)
 
 @dataclass
 class DriftDetectionTask(BaseTask):
-    """``BaseTask`` subclass: NannyML-backed input-data drift detection.
+    """NannyML-backed input-data drift detection.
 
-    Inherits the lazy-load + readiness machinery from ``BaseTask``.
-    Overrides ``train`` and ``predict`` because the lifecycle is
-    distinct (no per-algorithm Model, no scaler — the calculator is
-    the artifact).
+    Inherits the lazy-load and readiness machinery from ``BaseTask``
+    but overrides ``train`` and ``predict``: there is no per-algorithm
+    ``Model`` here — the fitted calculator is the artifact.
     """
 
-    # Drift fields. Dataclass field-ordering rule: every field after a
-    # parent's non-default field must itself have a default. The parent
-    # ``BaseTask.model`` is the last non-default; everything below has
-    # defaults or matches that pattern.
     forecaster_task_name: str = ""
     chunk_size: int = 6
     metric: str = "jensen_shannon"
 
-    # ---- New manifest-based protocol --------------------------------------
-    #
-    # Drift sits at the task layer (no separate ``Model`` class) but
-    # speaks the same ``fit / save_artifacts / load_artifacts`` shape
-    # the per-algorithm models use. NannyML has no documented non-
-    # pickle save for its calculator, so we persist the reference
-    # window + the config and refit on load — one-time cost per
-    # artefact load, then cached.
+    # NannyML's calculator has no pickle-free save, so we persist the
+    # reference window plus the config and refit at load time (cached).
 
     def fit(self, components: dict) -> tuple[dict, dict]:
-        """Build the runtime artefacts from a prepared reference frame.
+        """Bundle the reference frame and config into an artifacts dict.
 
-        No actual sklearn-style fit happens here — fitting the NannyML
-        calculator is deferred to :meth:`load_artifacts`, so the
-        artefacts dict is just the reference data plus the parameters
-        the calculator needs to refit later.
+        The NannyML calculator itself is fit at load time, so this
+        function only captures what's needed to refit it later.
         """
         reference_df: pd.DataFrame = components["reference_df"]
         column_names: list[str] = list(
@@ -92,11 +72,8 @@ class DriftDetectionTask(BaseTask):
         return artifacts, metrics
 
     def save_artifacts(self, artifacts: dict, dest: Path) -> dict[str, str]:
-        """Persist the reference frame and config sidecar.
-
-        Returns the ``role -> filename`` map for the manifest. The
-        calculator itself isn't serialised — :meth:`load_artifacts`
-        refits it from the persisted reference.
+        """Persist the reference frame and config sidecar; return the
+        ``role -> filename`` map for the manifest.
         """
         from intelligence.ml.artifact.sidecars import (
             save_input_spec,
@@ -133,9 +110,8 @@ class DriftDetectionTask(BaseTask):
         return files
 
     def load_artifacts(self, src: Path) -> dict:
-        """Inverse of :meth:`save_artifacts`. Refits the NannyML
-        calculator from the persisted reference frame so predict has
-        a ready-to-use ``drift_calculator`` in the returned dict.
+        """Read the reference frame and config, refit the NannyML
+        calculator, and return a dict ready for ``predict``.
         """
         try:
             import nannyml as nml
@@ -233,9 +209,8 @@ class DriftDetectionTask(BaseTask):
         )
 
     def _load_drift_artifact(self, version: str | None = None) -> tuple[dict | None, str | None]:
-        """Drift override of :meth:`BaseTask._load_artifact` — calls
-        ``self.load_artifacts`` (which is on this task, not on a Model)
-        and caches the loaded dict under the resolved version."""
+        """Variant of ``BaseTask._load_artifact`` that calls
+        ``self.load_artifacts`` (drift owns its own load path)."""
         from intelligence.ml.artifact import get_artifact_by_tag
 
         resolved = self._resolve_version(version)

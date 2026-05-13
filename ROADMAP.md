@@ -15,7 +15,7 @@ separate track.
 
 ## Phase 1 — Pilot enablement
 
-Cheap, no API breakage, builds trust during pilots.
+Cheap, doc-side changes.
 
 - **End-to-end "from zero to forecast" walkthrough.** Single tutorial
   layered over `examples/`: deploy via Helm, point at a Prometheus,
@@ -25,17 +25,29 @@ Cheap, no API breakage, builds trust during pilots.
   one YAML file plus a short README paragraph.
 - **MLflow integration.** Log params, metrics and artefacts per `/train`
   call. Unblocks Phase 5 (explainability artefacts need somewhere to
-  live; backtesting results too). Critical for pilot trust — answers
+  live; backtesting results too). answers
   "why did this model do X?" without code spelunking.
 - **Default Grafana dashboard JSON.** Shipped in the Helm chart.
   Predict latency, train durations, per-task error rate sourced from
   the existing `/metrics` endpoint. Trivial, high perceived polish.
 
-## Phase 2 — Zero-shot foundation model
+
+## Phase 2 — Adjacent ingestion and minor models
+
+Independent track.
+
+- **OpenTelemetry source.** Lib-side change in `src/intelligence/telemetry/`,
+  isolated, low risk. Extends `TelemetryConfig.source` and adds a
+  `TelemetrySource` implementation alongside `static` and `prometheus`.
+
+  - Thanos connection?
+
+
+## Phase 3 — Zero-shot foundation model
 
 Biggest ease-of-use and modernness lever in the whole roadmap.
 
-- **`kind: chronos`** (Hugging Face Chronos / Chronos-Bolt). Fits the
+- **`kind: chronos`** (Hugging Face Chronos 2 / Chronos-Bolt). Fits the
   existing builder pattern; model pulled on demand; no `/train` call
   required for inference. Changes the pitch from "train a model on
   your data" to "point it at your metric and forecast." Especially
@@ -43,7 +55,7 @@ Biggest ease-of-use and modernness lever in the whole roadmap.
   clearest beneficiaries.
 - Optional follow-up: `kind: timesfm` once Chronos has settled.
 
-## Phase 3 — Multivariate
+## Phase 4 — Multivariate
 
 Foundation that unlocks Phase 4 and Phase 5.
 
@@ -59,7 +71,7 @@ Blast-radius warning: this touches input contracts, version pinning,
 HF push/pull validation and every example. Own branch, contract tests
 as the gate.
 
-## Phase 4 — Transformers
+## Phase 5 — Transformers
 
 Worth doing only after multivariate.
 
@@ -69,7 +81,7 @@ Worth doing only after multivariate.
 - **PatchTST** as a lighter univariate alternative if TFT proves heavy
   for pilot hardware.
 
-## Phase 5 — Explainability and backtesting
+## Phase 6 — Explainability and backtesting
 
 MLflow and multivariate are prerequisites; both exist by this phase.
 
@@ -80,19 +92,13 @@ MLflow and multivariate are prerequisites; both exist by this phase.
   per-horizon error metrics. Pilots will ask "how good is this
   forecast?" — this is the answer.
 
-## Phase 6 — Adjacent ingestion and minor models
-
-Independent track, can slot in earlier if a pilot specifically asks.
-
-- **OpenTelemetry source.** Lib-side change in `src/intelligence/telemetry/`,
-  isolated, low risk. Extends `TelemetryConfig.source` and adds a
-  `TelemetrySource` implementation alongside `static` and `prometheus`.
+## Phase 7 - GPU support
+- **GPU as an extension** simple wiring for pytorch on gpu mode, larger image size but allows for faster training and inference of more complex models (Chronos inference + transformers-based models train/predict)
 
 ## Explicitly out of scope
 
-- A bespoke config UI. Helm + YAML is the right operator surface for
-  this audience; Grafana panels meet them where they already are.
-- An in-process retraining scheduler. Already deferred to external
-  CronJobs in the current README; keep it that way.
+- A bespoke UI. Helm + YAML is good enough for this level unless asked.
+- An in-process retraining scheduler. Deferred for future.
+- Stronger drift detection. Deferred as well.
 - Multi-replica work beyond the existing chart caveat unless a pilot
   drives the need.

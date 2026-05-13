@@ -1,16 +1,12 @@
-"""XGBoost model.
+"""XGBoost model implementing the ``Model`` protocol.
 
-Wraps ``ModelTrainer.train_xgb`` for the ``Model`` contract.
-
-``train_xgb`` expects components produced by ``make_xgb_prepare``:
-  - ``X_train`` / ``X_test``: 2-D arrays of supervised-structure features
-    (lagged values), normalized by ``scaler_X``.
-  - ``y_train`` (normalized) / ``y_test`` (unnormalized — the trainer
-    inverse-transforms ``y_pred`` and compares to raw ``y_test``).
-  - ``scaler_obj``: ``scaler_y`` — used by the trainer to inverse-transform
-    predictions.
-  - ``scaler_X``: the X-side scaler — saved in custom_objects so
-    ``predict`` can normalize fresh input windows.
+Expects components produced by ``make_xgb_prepare``:
+  - ``X_train`` / ``X_test``: 2-D lag-feature arrays scaled by ``scaler_X``.
+  - ``y_train`` (scaled) / ``y_test`` (raw — trainer inverse-transforms
+    ``y_pred`` and compares).
+  - ``scaler_obj``: the y-scaler.
+  - ``scaler_X``: the x-scaler, saved so ``predict`` can scale fresh
+    input windows.
 """
 
 from __future__ import annotations
@@ -30,10 +26,8 @@ logger = logging.getLogger(__name__)
 
 
 class XgbModel:
-    """XGBoost regressor.
-
-    Defaults are per-instance — two tasks reusing this model can carry
-    different ``n_estimators``/``max_depth``/etc. without subclassing.
+    """XGBoost regressor. Defaults are per-instance so different tasks
+    can carry different hyperparameters without subclassing.
     """
 
     name = "xgb"
@@ -46,15 +40,10 @@ class XgbModel:
             "eta": 0.1,
         }
 
-    # ---- New manifest-based protocol --------------------------------------
-
     def fit(self, components: dict) -> tuple[dict, dict]:
-        """Train and return ``(artifacts, metrics)``.
-
-        ``artifacts`` carries the runtime state predict consumes: the
-        fitted ``XGBRegressor``, both scalers (X and y), and the
-        sliding-window length. ``BaseTask`` injects ``input_spec`` into
-        this dict before calling ``save_artifacts``.
+        """Train and return ``(artifacts, metrics)``. ``artifacts``
+        carries the fitted regressor, both scalers, and the sliding-
+        window length.
         """
         from intelligence.ml.trainers import ModelTrainer
 
@@ -76,12 +65,10 @@ class XgbModel:
         return artifacts, metrics_jsonable
 
     def save_artifacts(self, artifacts: dict, dest: Path) -> dict[str, str]:
-        """Persist the artefacts as a flat directory and return the
-        ``role -> filename`` map for the manifest.
+        """Persist the artifacts and return the ``role -> filename`` map.
 
-        The model itself goes to ``xgb.ubj`` via xgboost's native
-        universal binary JSON format — bit-exact round-trip without
-        pickle. Both scalers persist as JSON + NPZ sidecars.
+        The model is saved as ``xgb.ubj`` via xgboost's native UBJ
+        format. Both scalers persist as JSON + NPZ sidecars.
         """
         from intelligence.ml.artifact.sidecars import (
             save_input_spec,
@@ -90,11 +77,9 @@ class XgbModel:
         )
 
         regressor = artifacts["regressor"]
-        # xgboost 1.7.6 (pinned, see pyproject for the reason) calls
-        # ``_get_type()`` during save; sklearn 1.8 removed
-        # ``_estimator_type`` from ``RegressorMixin`` so the attribute
-        # isn't inherited any more. Set it explicitly — harmless on
-        # older sklearn, fixes the save on newer sklearn.
+        # xgboost 1.7.6 expects ``_estimator_type`` during save, but
+        # sklearn 1.8 dropped it from ``RegressorMixin``. Set it
+        # explicitly — harmless on older sklearn.
         if not hasattr(regressor, "_estimator_type"):
             regressor._estimator_type = "regressor"
         regressor.save_model(str(dest / "xgb.ubj"))
@@ -127,8 +112,8 @@ class XgbModel:
         return files
 
     def load_artifacts(self, src: Path) -> dict:
-        """Inverse of :meth:`save_artifacts` — returns the same dict
-        shape that :meth:`fit` emits, plus ``input_spec`` if persisted.
+        """Restore the dict shape ``fit`` emits, plus ``input_spec``
+        if it was persisted.
         """
         from xgboost import XGBRegressor
 
@@ -139,7 +124,7 @@ class XgbModel:
         )
 
         regressor = XGBRegressor()
-        # See ``save_artifacts`` — same xgboost-1.7.6 / sklearn-1.8 quirk.
+        # Same xgboost-1.7.6 / sklearn-1.8 quirk as ``save_artifacts``.
         if not hasattr(regressor, "_estimator_type"):
             regressor._estimator_type = "regressor"
         regressor.load_model(str(src / "xgb.ubj"))
@@ -163,10 +148,9 @@ class XgbModel:
         input_series: dict[str, list[float]],
         horizon: int = 1,
     ) -> list[ForecastPoint]:
-        """Recursive multi-horizon: predict t+1, slide it into the window,
-        predict t+2, …, ``horizon`` times. No native confidence intervals
-        — ``lower``/``upper`` stay ``None`` on every ``ForecastPoint``.
-        Quantile XGB / bootstrap CIs are deferred (memory: roadmap-waves).
+        """Recursive multi-horizon: predict t+1, slide it into the
+        window, predict t+2, …, ``horizon`` times. No native confidence
+        intervals — ``lower``/``upper`` stay ``None``.
         """
         if not input_series:
             raise ValueError("input_series is empty")

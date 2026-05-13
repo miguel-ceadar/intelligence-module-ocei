@@ -1,16 +1,12 @@
-"""Static data loaders — compose a ``TelemetrySource`` with a ``prepare``
-callable to produce the components dict that ``Model.train``
-expects.
+"""Data loaders that compose a ``TelemetrySource`` with a ``prepare``
+callable to produce the components dict each ``Model.fit`` expects.
 
-Two seams in one class:
+Two seams:
   - **source**: where data comes from (``StaticSource``,
-    ``PrometheusSource``, ...). Returns a raw DataFrame.
+    ``PrometheusSource``, …). Returns a raw DataFrame.
   - **prepare**: how the DataFrame becomes training components
     (split, scale, window). The default is univariate; multivariate
     tasks pass their own.
-
-Public factories keep their pre-phase-2 signatures so existing task
-factories in ``catalog.py`` don't churn.
 """
 
 from __future__ import annotations
@@ -82,8 +78,8 @@ class StaticCsvLoader:
         source: where data comes from. Defaults to a ``StaticSource``
             rooted at ``base_dir`` (or the bundled samples dir if
             neither is given).
-        prepare: ``DataFrame -> components dict``. Defaults to the
-            univariate split + MinMax-scaler used by the legacy ARIMA /
+        prepare: ``DataFrame -> components dict``. Defaults to a
+            univariate split + MinMax-scaler used by the ARIMA /
             XGB paths.
         value_col: which column the default prepare picks. Ignored when
             a custom ``prepare`` is supplied.

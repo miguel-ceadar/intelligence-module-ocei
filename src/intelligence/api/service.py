@@ -63,10 +63,8 @@ config = _load_app_config()
 registry = build_registry_from_config(config.intelligence)
 REGISTERED_TASKS.set(len(registry))
 
-# Hold strong references to in-flight bootstrap tasks so the event-loop
-# garbage collector doesn't reap them mid-run (Python issue: asyncio
-# only weak-refs tasks). The done_callback removes each task once it
-# finishes, so the set stays bounded.
+# asyncio only weak-refs tasks; hold strong refs so bootstrap coroutines
+# aren't garbage-collected mid-run. The done_callback drops each entry.
 _bootstrap_tasks: set = set()
 
 
@@ -98,9 +96,7 @@ app = FastAPI(
     version=__version__,
     lifespan=lifespan,
 )
-# Order matters: ObservabilityMiddleware records every request including
-# 401s (which is useful — auth failures should be visible on /metrics).
-# Auth middleware therefore runs inside the observability one.
+# Observability runs outside auth so 401s show up on /metrics.
 app.add_middleware(ObservabilityMiddleware)
 app.add_middleware(
     BearerTokenMiddleware,
@@ -195,13 +191,12 @@ def list_tasks() -> dict:
 
 @app.get("/tasks/{task_name}/versions")
 def list_task_versions(task_name: str) -> dict:
-    """Locally-stored artefact versions for this task, newest first.
+    """Locally-stored artifact versions for this task, newest first.
 
-    Useful for rollback decisions: a client picks a known-good version
-    from this list and sends it as ``model_version`` on the next
-    predict request (or operators set it as ``pinned_version:`` in
-    config). Artefacts without a readable manifest (i.e. not produced
-    by this codebase) are filtered out.
+    Useful for rollback: pick a known-good version and send it as
+    ``model_version`` on the next predict request, or set it as
+    ``pinned_version:`` in config. Artifacts without a readable
+    manifest are filtered out.
     """
     if task_name not in registry:
         raise HTTPException(status_code=404, detail=f"unknown task: {task_name}")
@@ -278,12 +273,11 @@ def train(task_name: str, req: TrainRequest):
 
 @app.post("/models/sync")
 def sync_model(req: ModelSyncRequest):
-    """Push a local Bento to HF or pull one from HF into the local store.
+    """Push a local model to Hugging Face or pull one into the local store.
 
-    Requires ``model_repo.hf_enabled`` in config (operator opt-in) and
-    ``HF_TOKEN`` in the environment (read lazily by ``model_repo.*``).
-    A pulled Bento that lacks ``input_spec`` is *still refused* by predict
-    by default — see plan §3.5 and ``BaseTask._verify_bento``.
+    Requires ``model_repo.hf_enabled`` in config and ``HF_TOKEN`` in
+    the environment. Pulled models still need to match the task's
+    ``input_spec`` to be served (see ``BaseTask._verify_artifact``).
     """
     cfg = config.intelligence.model_repo
     if not cfg.hf_enabled:
@@ -333,12 +327,8 @@ def predict(task_name: str, req: PredictRequest):
     return result.model_dump()
 
 
-# ---- BentoML hosting --------------------------------------------------
-# A ``bentoml.Service`` is what ``bentoml serve`` runs (alternative to
-# ``uvicorn intelligence.api.service:app``, which is what the Docker
-# image uses). Wrapping the FastAPI app keeps both deployment paths
-# working from one entry point.
-
+# Expose the FastAPI app as a ``bentoml.Service`` so ``bentoml serve``
+# works alongside ``uvicorn intelligence.api.service:app``.
 import bentoml  # noqa: E402
 
 svc = bentoml.Service(name="intelligence")

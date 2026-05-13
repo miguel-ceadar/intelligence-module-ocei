@@ -1,19 +1,19 @@
-"""Hugging Face Hub push/pull for local manifest-described artefacts.
+"""Hugging Face Hub push/pull for local manifest-described artifacts.
 
 The HF token is read from ``HF_TOKEN`` at call time — never persisted
 in config files or class state. A missing token raises
 ``PermissionError`` so the API translates it to HTTP 401.
 
-Pulled artefacts are validated against the manifest schema and the
+Pulled artifacts are validated against the manifest schema and the
 per-directory filename allowlist *before any file is opened*. There
-is no ``pickle.load`` on the pull path — pulled artefacts are
+is no ``pickle.load`` on the pull path — pulled artifacts are
 framework-native files (``.ubj`` / ``.safetensors`` / ``.parquet``)
-plus typed JSON sidecars. A pulled artefact that lacks ``input_spec``
+plus typed JSON sidecars. A pulled artifact that lacks ``input_spec``
 is still refused at predict time by ``BaseTask._verify_artifact``
 unless ``allow_unverified_models=True``.
 
-Push goes the other way: the local artefact directory is re-validated
-against its manifest before upload, so a corrupted local artefact
+Push goes the other way: the local artifact directory is re-validated
+against its manifest before upload, so a corrupted local artifact
 won't propagate to the remote repo.
 """
 
@@ -47,12 +47,12 @@ def push_to_hf(
     repo_id: str,
     commit_message: str | None = None,
 ) -> str:
-    """Upload a local manifest-described artefact directory to ``repo_id``.
+    """Upload a local manifest-described artifact directory to ``repo_id``.
 
-    The whole artefact directory (manifest + native model file +
+    The whole artifact directory (manifest + native model file +
     typed sidecars) is uploaded under
     ``{tag.name}/{tag.version}/``. Before upload we re-validate the
-    directory against its manifest — a corrupt local artefact won't
+    directory against its manifest — a corrupt local artifact won't
     propagate to the remote repo.
 
     Returns the local tag (unchanged by push).
@@ -64,9 +64,9 @@ def push_to_hf(
     bento = bentoml.models.get(model_tag)
     folder = Path(bento.path)
     if not folder.exists():
-        raise FileNotFoundError(f"local artefact folder missing: {folder}")
+        raise FileNotFoundError(f"local artifact folder missing: {folder}")
 
-    # Re-validate before publishing — refuses to upload a corrupt artefact.
+    # Re-validate before publishing — refuses to upload a corrupt artifact.
     manifest = read_manifest(folder)
     validate_artifact_directory(folder, manifest)
 
@@ -86,7 +86,7 @@ def pull_from_hf(model_tag: str, repo_id: str) -> str:
     """Download ``{name}/{version}/`` from ``repo_id`` and import into
     the local store under a fresh tag.
 
-    The manifest is parsed and the artefact directory is validated
+    The manifest is parsed and the artifact directory is validated
     against the per-directory filename allowlist *before any file is
     opened*. Manifests with the wrong schema version, hostile filenames
     (traversal, hidden, executable extensions), or stowaway files in

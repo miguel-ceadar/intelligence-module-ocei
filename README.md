@@ -5,8 +5,7 @@
 [![DOI](https://img.shields.io/badge/DOI-10.1145%2F3721889.3721929-blue.svg)](https://doi.org/10.1145/3721889.3721929)
 
 > Train forecasting and drift-detection models against your existing
-> Prometheus metrics, served as a small HTTP API. Plugs into the
-> monitoring you already run — no glue code, no separate training infra.
+> Prometheus metrics, served as a small HTTP API.
 
 Point the service at your Prometheus, list the PromQL queries for the
 metrics you care about, and you get `/train` + `/predict` endpoints per
@@ -28,7 +27,7 @@ Four algorithm **kinds** you compose into tasks via YAML:
 |---|---|---|
 | `arima` | statsmodels ARIMA | Single or multi-step; native 95 % confidence intervals |
 | `xgb` | XGBoost regressor | Sliding-window, recursive multi-step (no CI) |
-| `lstm` | PyTorch LSTM | Sliding-window, direct multi-step (CI deferred) |
+| `lstm` | PyTorch LSTM | Sliding-window, direct multi-step (no CI) |
 | `drift` | NannyML | Univariate drift alert on a chunk, paired with a forecaster |
 
 A *task* is one PromQL query + one kind. Declare as many as you want
@@ -43,17 +42,16 @@ Two data sources, picked once per deployment:
 
 ## Quick start
 
-The deployable artefact is the container image at
-`ghcr.io/miguel-ceadar/icos-intelligence-ocei`. Two ways to consume it:
-Helm for Kubernetes, raw `docker run` for a single host. A self-
-contained demo lives in this repo for evaluators who want to see it
-work in 3 minutes — the demo bundles a throwaway Prometheus +
-node-exporter and is not a deployment template.
+The deployable artifact is the container image at
+`ghcr.io/miguel-ceadar/icos-intelligence-ocei`. Two ways to consume
+it: Helm for Kubernetes, raw `docker run` for a single host. A
+self-contained demo runs against a bundled Prometheus + node-exporter
+for quick local evaluation — it is not a deployment template.
 
 ### Deploy on Kubernetes (Helm)
 
 The chart is published as an OCI artifact. Pin to a release version
-(`latest` drifts under you):
+(avoid `latest`, which is not stable):
 
 ```bash
 helm install icos-intelligence-ocei \
@@ -81,11 +79,11 @@ docker run -d --name icos-intelligence-ocei \
 curl http://localhost:3000/healthz
 ```
 
-Drop a `config.yaml` next to the command — start from any
+Place a `config.yaml` next to the command — start from any
 [`examples/*/config.yaml`](examples/) and edit the PromQL queries.
-Override the Prometheus endpoint via the env var as shown; same trick
-for any other field
-(`INTELLIGENCE_<SECTION>__<FIELD>` — see [Configuration](#configuration)).
+Any field in the config can also be overridden via an environment
+variable (`INTELLIGENCE_<SECTION>__<FIELD>` — see
+[Configuration](#configuration)).
 
 ### See it work (in-repo demo, 3 minutes)
 
@@ -93,11 +91,11 @@ for any other field
 make e2e
 ```
 
-Pulls the published image, spins up a throwaway Prometheus +
-node-exporter, exercises train + predict on all four tasks, dumps logs
-on failure. `make down-demo` tears it down. Compose lives in this repo
-solely for this demo — pilots deploy via Helm or `docker run` against
-their own Prometheus.
+Pulls the published image, spins up a bundled Prometheus +
+node-exporter, exercises train + predict on all four tasks, dumps
+logs on failure. `make down-demo` tears it down. The compose file is
+for the demo only; real deployments use Helm or `docker run` against
+your own Prometheus.
 
 ### Calling the API
 
@@ -178,8 +176,8 @@ intelligence:
       endpoint: http://prometheus.monitoring.svc:9090
       token_env: PROM_TOKEN          # or token_file: /var/run/secrets/prom
       tls_skip_verify: false
-    allow_endpoint_override: false   # SSRF defense; flip on per deployment if you want
-                                     # `data_source.endpoint` overrides on train requests
+    allow_endpoint_override: false   # set true to allow `data_source.endpoint`
+                                     # overrides on train requests (SSRF risk)
   tasks:
     cpu_forecast_arima:
       kind: arima
@@ -213,10 +211,10 @@ curl -X POST http://localhost:3000/tasks/cpu_forecast_arima/train \
 ```
 
 The configured auth + TLS settings carry through to the override
-(per-request token rotation isn't in scope). Off by default — an
-authenticated POST /train can otherwise redirect outbound traffic
-anywhere, which is an SSRF probe surface. Flip on only for trusted
-client populations.
+(per-request token rotation is not supported). Off by default,
+because an authenticated `POST /train` can otherwise redirect
+outbound traffic to arbitrary hosts (SSRF). Enable only for trusted
+clients.
 
 ### Auto-train on startup
 
@@ -240,9 +238,9 @@ silently block startup.
 
 ### Retraining
 
-Stays external. The service ships no in-process scheduler at this stage. Point a
-`CronJob` at `POST /tasks/{task}/train` on whatever cadence makes
-sense for the deployment.
+The service has no built-in scheduler. Point an external `CronJob` (or
+equivalent) at `POST /tasks/{task}/train` on whatever cadence suits
+the deployment.
 
 ### Hugging Face push / pull
 
@@ -257,15 +255,15 @@ The HF token is read from the `HF_TOKEN` environment variable at
 request time — never stored in config. Request shape for
 `POST /models/sync` is at `/docs`.
 
-### Pretrained Bentos
+### Pretrained models
 
-A pulled Bento becomes available to a task only if its stored
+A pulled model becomes available to a task only if its stored
 `input_spec` matches the task's spec (same `n_features`,
-`feature_names`, `steps_back`). Older Bentos that predate the contract
-are refused at predict time — the pull still works (the artifact lands
-in the local store), but `predict` won't serve from it. The verification
-is enforced; there's no YAML opt-out (the `allow_unverified_models`
-field on `BaseTask` is a debugging hook for forks, not pilot-facing).
+`feature_names`, `steps_back`). Mismatched models are refused at
+predict time — the pull still completes and the artifact lands in
+the local store, but `predict` will not serve from it. Verification
+is always enforced; the `allow_unverified_models` flag on `BaseTask`
+exists only as a debugging hook and has no YAML surface.
 
 ## Extending
 
@@ -320,7 +318,7 @@ A new kind — say `prophet` or `transformer` — is three local edits:
    constructs a `BaseTask` from the config block. Register it in
    `BUILDERS` in `tasks/builders/__init__.py`.
 
-Pilots then enable it with `kind: <new>` in YAML.
+Users then enable it with `kind: <new>` in YAML.
 
 ### Add a new data source (lib-side change)
 

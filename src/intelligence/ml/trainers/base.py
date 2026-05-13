@@ -1,10 +1,6 @@
 """``ModelTrainer`` — train ARIMA, XGBoost, and PyTorch-LSTM models from
-precomputed ``data_components``.
-
-Three independent methods (``train_arima`` / ``train_xgb`` /
-``train_pytorch``); the ``ModelAdapter`` in ``intelligence.ml.models``
-prepares the components dict and calls one. The data source (CSV /
-PromQL / future OTel) is decoupled — see ``intelligence.telemetry``.
+precomputed ``data_components``. The per-kind ``Model`` classes in
+``intelligence.ml.models`` prepare the components and call one method.
 """
 
 from __future__ import annotations
@@ -53,22 +49,11 @@ def _make_loaders(train_dataset, test_dataset, batch_size: int) -> tuple[DataLoa
 
 class ModelTrainer:
     """Train ARIMA / XGBoost / PyTorch-LSTM models from precomputed
-    ``data_components``.
-
-    Each ``train_*`` method is independent — call only the one for the
-    model you want.
+    ``data_components``. Each ``train_*`` method is independent.
     """
 
     def __init__(self, data_components: dict[str, Any]) -> None:
         self.data_components = data_components
-
-    def make_persistent(self, alias: str | None = None) -> None:
-        # No-op kept for legacy-compiler call-site compatibility. Models
-        # are persisted via ``bentoml.*.save_model`` inside each train_*
-        # method below.
-        return None
-
-    # ---- XGBoost ------------------------------------------------------
 
     def train_xgb(self) -> tuple[dict, XGBRegressor]:
         model = XGBRegressor()
@@ -80,8 +65,6 @@ class ModelTrainer:
         y_pred = self.data_components["scaler_obj"].inverse_transform(y_pred.reshape(-1, 1))
         y_test = np.array(self.data_components["y_test"]).reshape(-1, 1)
         return compute_metrics(y_test, y_pred), model
-
-    # ---- ARIMA --------------------------------------------------------
 
     def train_arima(self):
         train = self.data_components["X_train"].squeeze(1)
@@ -107,8 +90,6 @@ class ModelTrainer:
             self.data_components["X_test"].reshape(-1, 1)
         )
         return compute_metrics(y_test, y_pred), model, history, y_test, y_pred
-
-    # ---- PyTorch LSTM -------------------------------------------------
 
     def _train_lstm(self, model, train_loader, criterion, optimizer, num_epochs, device):
         step_epoch: list[int] = []

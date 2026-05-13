@@ -1,11 +1,10 @@
-"""Bootstrap auto-train on startup (plan §3.5).
+"""Bootstrap auto-train on startup.
 
 When a task's ``bootstrap.auto_train_on_startup`` is true, the service
-should spawn a background coroutine on startup that calls
-``task.train(...)``. Until that bootstrap completes, ``/readyz``
-returns 503 for the task. Failure modes (PromQL error, dataset
-missing) leave the task in ``failed`` state with the error surfaced
-through ``/readyz``.
+spawns a background coroutine on startup that calls ``task.train(...)``.
+Until that bootstrap completes, ``/readyz`` returns 503 for the task.
+Failure modes (PromQL error, dataset missing) leave the task in
+``failed`` state with the error surfaced through ``/readyz``.
 """
 
 from __future__ import annotations

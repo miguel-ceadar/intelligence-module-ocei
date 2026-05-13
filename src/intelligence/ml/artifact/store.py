@@ -1,16 +1,13 @@
-"""Artefact store — thin wrapper over bentoml's tag/version layer.
+"""Artifact store — a thin wrapper over bentoml's tag/version layer.
 
-We ride bentoml's local store for tag/version semantics (``:latest``,
-immutable versions, ``creation_time``) but bypass ``picklable_model``
-entirely: ``save_artifact`` opens a fresh model directory via
-``bentoml.models.create``, hands it to a caller-supplied ``write_fn``
-that populates files, then commits a manifest and validates the
-directory before the bento closes.
+We use bentoml's local store for tag/version semantics (``:latest``,
+immutable versions, ``creation_time``) but skip its ``picklable_model``
+machinery: ``save_artifact`` opens a fresh model directory, hands it
+to a caller-supplied ``write_fn`` that populates files, writes a
+manifest, and validates the directory before committing.
 
-The bentoml-specific types (``Tag``, ``NotFound``, ``ModelContext``)
-stay inside this module — call-sites work in terms of
-:class:`SavedArtifact` + string tags so swapping the underlying store
-later is a one-file change.
+bentoml-specific types stay inside this module; call-sites work in
+terms of ``SavedArtifact`` + string tags.
 """
 
 from __future__ import annotations
@@ -37,7 +34,7 @@ logger = logging.getLogger(__name__)
 
 @dataclass(frozen=True)
 class SavedArtifact:
-    """Read-only handle to a committed artefact in the local store."""
+    """Read-only handle to a committed artifact in the local store."""
 
     tag: str  # "name:version" string — pass back to ``get_artifact_by_tag``
     name: str
@@ -48,9 +45,8 @@ class SavedArtifact:
 
 
 def _model_context() -> ModelContext:
-    # bentoml requires a context even though we don't ship a framework
-    # backend; ``intelligence`` here is a marker so an operator inspecting
-    # the bentoml CLI sees our models distinctly.
+    # bentoml requires a context; the framework name is a marker so
+    # the bentoml CLI shows these models distinctly.
     return ModelContext(framework_name="intelligence", framework_versions={})
 
 
@@ -59,13 +55,12 @@ def save_artifact(
     kind: str,
     write_fn: Callable[[Path], dict[str, str]],
 ) -> SavedArtifact:
-    """Open a fresh artefact directory and commit it to the local store.
+    """Open a fresh artifact directory and commit it to the local store.
 
-    ``write_fn(path)`` receives a writable directory and must return the
-    ``role -> filename`` map it populated. ``save_artifact`` then writes
-    ``manifest.json`` and validates the directory against the manifest
-    — stowaway files, declared-but-missing files, or unsafe extensions
-    raise ``ManifestError`` before the bento commits.
+    ``write_fn(path)`` receives a writable directory and must return
+    the ``role -> filename`` map it populated. The manifest is then
+    written and validated; any mismatch raises ``ManifestError`` before
+    the commit succeeds.
     """
     with bentoml.models.create(
         name=name,
@@ -83,14 +78,14 @@ def save_artifact(
 
     fetched = get_artifact_by_tag(tag)
     if fetched is None:  # pragma: no cover — defence in depth
-        raise RuntimeError(f"saved artefact {tag} not retrievable")
+        raise RuntimeError(f"saved artifact {tag} not retrievable")
     return fetched
 
 
 def get_artifact_by_tag(tag: str) -> SavedArtifact | None:
     """Resolve a tag (``name:version`` or ``name:latest``) to a
-    :class:`SavedArtifact`. Returns ``None`` if no artefact is found —
-    callers translate that to HTTP 404 / 503 themselves.
+    ``SavedArtifact``, or ``None`` if not found. Callers translate
+    ``None`` to HTTP 404 / 503 themselves.
     """
     try:
         m = bentoml.models.get(tag)
@@ -109,14 +104,11 @@ def get_artifact_by_tag(tag: str) -> SavedArtifact | None:
 
 
 def list_artifacts_by_name(name: str) -> list[SavedArtifact]:
-    """Return every artefact matching ``name``, newest first.
-
-    Models with an unreadable manifest are silently skipped — they were
-    written by something other than this codebase (e.g. a stale
-    picklable_model bento from before the migration) and we have no way
-    to interpret them.
+    """Return every artifact matching ``name``, newest first. Models
+    with an unreadable manifest are skipped — they were not written
+    by this codebase.
     """
-    artefacts: list[SavedArtifact] = []
+    artifacts: list[SavedArtifact] = []
     for m in bentoml.models.list():
         if m.tag.name != name:
             continue
@@ -124,9 +116,9 @@ def list_artifacts_by_name(name: str) -> list[SavedArtifact]:
         try:
             manifest = read_manifest(path)
         except Exception:
-            logger.warning("skipping artefact %s with unreadable manifest", m.tag)
+            logger.warning("skipping artifact %s with unreadable manifest", m.tag)
             continue
-        artefacts.append(
+        artifacts.append(
             SavedArtifact(
                 tag=str(m.tag),
                 name=m.tag.name,
@@ -136,19 +128,15 @@ def list_artifacts_by_name(name: str) -> list[SavedArtifact]:
                 created_at=m.info.creation_time.isoformat(),
             )
         )
-    artefacts.sort(key=lambda a: a.created_at, reverse=True)
-    return artefacts
+    artifacts.sort(key=lambda a: a.created_at, reverse=True)
+    return artifacts
 
 
 def import_artifact(name: str, source_dir: Path) -> SavedArtifact:
-    """Copy a vetted artefact directory into the local store under
-    ``name``. Used by the HF pull path: the caller is expected to have
-    validated the manifest already, but this function re-validates so a
-    bug in the pull path can't smuggle a stowaway in.
-
-    ``model.yaml`` from the source is intentionally skipped — bentoml
-    writes its own when the new bento commits, and the source's copy
-    would be redundant and might disagree with the new tag.
+    """Copy a vetted artifact directory into the local store under
+    ``name``. Re-validates the manifest defensively, even though the
+    caller is expected to have done so. ``model.yaml`` is skipped:
+    bentoml writes its own when the new bento commits.
     """
     manifest = read_manifest(source_dir)
     validate_artifact_directory(source_dir, manifest)

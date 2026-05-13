@@ -1,16 +1,11 @@
-"""Self-describing manifest + global extension allowlist.
+"""Artifact manifest schema and the file-extension allowlist.
 
-The manifest is the security boundary for artefacts pulled from external
-sources (HF Hub today). Each artefact's ``manifest.json`` declares
-``kind`` plus a ``files: {role: filename}`` map; the validator enforces
-that *every* file in the directory is either bentoml-generated
-(``model.yaml``), our own ``manifest.json``, or explicitly declared,
-*and* that every filename uses an extension on the global allowlist.
-
-Adding a new model kind requires **no edits to this module** — the kind
-writes whatever files it needs and declares them in its manifest. The
-security guarantee is purely structural: no executable types, no
-pickle, no path traversal, no stowaway files.
+Each artifact's ``manifest.json`` declares ``kind`` plus a
+``files: {role: filename}`` map. Validation requires that every file
+in the directory is either ``manifest.json``, the bentoml-generated
+``model.yaml``, or declared in the manifest, and that every filename
+uses an extension on the allowlist. The structural guarantee is: no
+executable types, no pickle, no path traversal, no stray files.
 """
 
 from __future__ import annotations
@@ -23,12 +18,9 @@ from pydantic import BaseModel, ValidationError
 
 SCHEMA_VERSION = 1
 
-# Global allowlist of file extensions ever permitted in an artefact
-# directory. No executable / opaque-binary types — no ``.pkl``,
-# ``.pickle``, ``.so``, ``.dylib``, ``.py``, ``.sh``, ``.exe``. Adding a
-# new model kind that needs a new file format extends this list (and
-# only this list — kind-specific declarations live in the manifest the
-# kind writes, not here).
+# File extensions permitted in an artifact directory. No executable
+# or opaque-binary types. A new model kind that needs another format
+# extends this list.
 ALLOWED_EXTENSIONS = frozenset(
     {
         ".json",  # manifest, hyperparams, scaler metadata, drift config
@@ -40,30 +32,24 @@ ALLOWED_EXTENSIONS = frozenset(
     }
 )
 
-# Filenames always tolerated alongside whatever the kind declares: our
-# own manifest and the small YAML bentoml writes when we ride its
-# store/tag layer (see ``store.py``).
+# Filenames always tolerated alongside whatever the manifest declares:
+# the manifest itself and the small YAML that bentoml writes.
 ALWAYS_ALLOWED = frozenset({"manifest.json", "model.yaml"})
 
 
 class ManifestError(ValueError):
-    """Raised when an artefact directory fails manifest or filename checks.
-
-    Subclasses ``ValueError`` so the existing API error handler in
-    ``service.py`` translates it to HTTP 422 without extra wiring.
+    """Raised when an artifact directory fails manifest or filename
+    checks. Subclassing ``ValueError`` makes the API surface it as 422.
     """
 
 
 class Manifest(BaseModel):
-    """The on-disk manifest. Self-describing: ``files`` maps a stable
-    role name (``"model"``, ``"scaler_x"``, ``"input_spec"``, …) to a
-    bare filename. The kind's loader reads roles, not literal filenames,
-    so file naming stays a private detail of each kind.
-
-    ``kind`` is an open string — the manifest layer doesn't enforce a
-    closed set, so adding a kind doesn't require a manifest edit. The
-    model-loader dispatch (where the kind → builder mapping lives)
-    fails with a clear error if a manifest references an unknown kind.
+    """The on-disk manifest. ``files`` maps a stable role name
+    (``"model"``, ``"scaler_x"``, ``"input_spec"``, …) to a bare
+    filename; loaders read by role so each kind owns its file naming.
+    ``kind`` is an open string — adding a kind doesn't require a
+    manifest edit; the model-loader dispatch is where unknown kinds
+    fail.
     """
 
     schema_version: int
@@ -95,11 +81,9 @@ def _check_filename(name: str) -> None:
 
 
 def validate_manifest_dict(data: dict) -> Manifest:
-    """Parse a manifest dict and enforce schema_version + filename rules.
-
-    Schema_version is exact equality — we don't read older formats.
-    Pre-pilot there are no historical artefacts to support, so a
-    mismatch means a malformed or hostile manifest.
+    """Parse a manifest dict and enforce schema_version + filename
+    rules. ``schema_version`` is checked for exact equality; there is
+    no compatibility shim for older versions.
     """
     try:
         manifest = Manifest.model_validate(data)
@@ -115,22 +99,21 @@ def validate_manifest_dict(data: dict) -> Manifest:
 
 
 def validate_artifact_directory(path: Path, manifest: Manifest) -> None:
-    """Cross-check the directory contents against the manifest.
+    """Cross-check directory contents against the manifest.
 
-    Every file on disk must be in :data:`ALWAYS_ALLOWED` or declared by
-    the manifest; every declared file must actually exist; no
-    subdirectories. Stowaways and missing artefacts both raise.
+    Every file on disk must be in ``ALWAYS_ALLOWED`` or declared by
+    the manifest; every declared file must exist; no subdirectories.
     """
     declared = set(manifest.files.values()) | ALWAYS_ALLOWED
 
     for entry in path.iterdir():
         if entry.is_dir():
             raise ManifestError(
-                f"artefact directory must be flat; subdirectory not allowed: {entry.name!r}"
+                f"artifact directory must be flat; subdirectory not allowed: {entry.name!r}"
             )
         if entry.name not in declared:
             raise ManifestError(
-                f"file {entry.name!r} present in artefact but not declared in manifest"
+                f"file {entry.name!r} present in artifact but not declared in manifest"
             )
 
     for role, fname in manifest.files.items():
@@ -153,12 +136,11 @@ def read_manifest(path: Path) -> Manifest:
 
 
 def write_manifest(path: Path, kind: str, files: dict[str, str]) -> Manifest:
-    """Write a fresh ``manifest.json`` into the artefact directory.
+    """Write a fresh ``manifest.json`` into the artifact directory.
 
-    Each model's ``save_artifacts`` writes its files and then calls this
-    to commit the declaration. Path-traversing or unknown-extension
-    filenames are refused here too, so a buggy ``save_artifacts`` can't
-    poison its own artefact.
+    Each model's ``save_artifacts`` writes its files and then calls
+    this to commit the declaration. Bad filenames are refused here
+    too, so a buggy ``save_artifacts`` can't poison its own artifact.
     """
     for fname in files.values():
         _check_filename(fname)

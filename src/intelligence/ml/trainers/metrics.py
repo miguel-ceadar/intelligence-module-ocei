@@ -24,11 +24,8 @@ def symmetric_mean_absolute_percentage_error(y_true, y_pred) -> float:
 
 
 def print_size_of_model(model, label: str = "") -> float:
-    """Serialize the model state_dict and return its size in MB.
-
-    The legacy implementation wrote ``temp.p`` into the current working
-    directory; we use a real temp file so concurrent calls don't collide
-    and a crash mid-call doesn't leave litter.
+    """Serialize the model state_dict to a temp file and return its
+    size in MB.
     """
     fd, path = tempfile.mkstemp(suffix=".pt")
     os.close(fd)

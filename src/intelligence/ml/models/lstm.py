@@ -1,17 +1,14 @@
-"""LSTM model.
+"""PyTorch LSTM implementing the ``Model`` protocol.
 
-Wraps ``ModelTrainer.train_pytorch`` for the ``Model`` contract.
-
-``train_pytorch`` expects components produced by ``make_lstm_prepare``:
-  - ``X_train`` / ``X_test``: torch tensors shape ``(samples, look_back, num_variables)``.
-  - ``y_train`` / ``y_test``: torch tensors shape ``(samples, horizon * num_variables)``.
+Expects components produced by ``make_lstm_prepare``:
+  - ``X_train`` / ``X_test``: ``(samples, look_back, num_variables)`` tensors.
+  - ``y_train`` / ``y_test``: ``(samples, horizon * num_variables)`` tensors.
   - ``train_dataset`` / ``test_dataset``: ``TimeSeriesDataset`` instances.
   - ``batch_size``.
-  - ``scaler_obj``: a single MinMaxScaler fit on the raw multivariate data,
-    used to inverse-transform predictions and to normalize predict input.
+  - ``scaler_obj``: a single MinMaxScaler fit on the raw multivariate data.
   - ``model_parameters``: ``input_size``, ``output_size``, ``hidden_size``,
     ``num_epochs``. Optional: ``distill``. ``output_size`` is the trained
-    horizon — predict refuses request horizons above it.
+    horizon; predict refuses requests above it.
 """
 
 from __future__ import annotations
@@ -31,14 +28,13 @@ logger = logging.getLogger(__name__)
 
 
 class LstmModel:
-    """PyTorch LSTM forecaster.
-
-    Defaults are per-instance — different tasks reusing this model
-    pick their own ``hidden_size``, ``num_epochs``, etc.
+    """PyTorch LSTM forecaster. Defaults are per-instance, so tasks
+    reusing this model pick their own ``hidden_size``, ``num_epochs``,
+    etc.
     """
 
     name = "lstm"
-    has_drift = False  # NannyML drift only wired for ARIMA/XGB in the legacy code
+    has_drift = False
 
     def __init__(self, **default_params: Any) -> None:
         self.default_params = default_params or {
@@ -48,15 +44,10 @@ class LstmModel:
             "num_epochs": 3,
         }
 
-    # ---- New manifest-based protocol --------------------------------------
-
     def fit(self, components: dict) -> tuple[dict, dict]:
-        """Train and return ``(artifacts, metrics)``.
-
-        ``artifacts`` carries the runtime state predict consumes: the
-        trained ``nn.Module``, the scaler, and the architecture sizes
-        plus window metadata. ``BaseTask`` injects ``input_spec`` into
-        this dict before calling ``save_artifacts``.
+        """Train and return ``(artifacts, metrics)``. ``artifacts``
+        carries the trained network, the scaler, and the architecture
+        sizes plus window metadata.
         """
         from intelligence.ml.trainers import ModelTrainer
 
@@ -80,13 +71,11 @@ class LstmModel:
         return artifacts, metrics_jsonable
 
     def save_artifacts(self, artifacts: dict, dest: Path) -> dict[str, str]:
-        """Persist the artefacts as a flat directory and return the
-        ``role -> filename`` map for the manifest.
+        """Persist the artifacts and return the ``role -> filename`` map.
 
-        State_dict goes to ``lstm.safetensors`` — bit-exact, pickle-
-        free. ``arch.json`` carries the constructor sizes so
-        ``load_artifacts`` can rebuild a fresh ``nn.Module`` of the
-        right shape before loading the state_dict into it.
+        The state_dict goes to ``lstm.safetensors``. ``arch.json``
+        carries the constructor sizes so ``load_artifacts`` can rebuild
+        the network before loading weights.
         """
         from safetensors.torch import save_file
 
@@ -97,7 +86,7 @@ class LstmModel:
         )
 
         network = artifacts["network"]
-        network.cpu()  # safetensors is device-agnostic; CPU keeps things portable
+        network.cpu()  # keep weights portable across devices
         save_file(network.state_dict(), str(dest / "lstm.safetensors"))
 
         save_json(
@@ -128,8 +117,8 @@ class LstmModel:
         return files
 
     def load_artifacts(self, src: Path) -> dict:
-        """Inverse of :meth:`save_artifacts` — returns the same dict
-        shape that :meth:`fit` emits, plus ``input_spec`` if persisted.
+        """Restore the dict shape ``fit`` emits, plus ``input_spec``
+        if it was persisted.
         """
         from safetensors.torch import load_file
 
@@ -170,14 +159,11 @@ class LstmModel:
         input_series: dict[str, list[float]],
         horizon: int = 1,
     ) -> list[ForecastPoint]:
-        """Direct multi-output: the network was trained with
-        ``output_size=trained_horizon`` and emits that many values in a
-        single forward pass. Request ``horizon`` above the trained value
-        is refused — retrain with a larger output window. Below it,
-        truncate to the requested length.
-
-        No native CIs (MC-dropout deferred per memory note); each
-        ``ForecastPoint.lower`` / ``upper`` stays ``None``.
+        """Direct multi-output: the network emits ``trained_horizon``
+        values in a single forward pass. Requests above
+        ``trained_horizon`` are refused; below it, the output is
+        truncated. No confidence intervals — ``lower``/``upper`` stay
+        ``None``.
         """
         import torch
 
@@ -225,9 +211,8 @@ class LstmModel:
 
         if num_variables == 1:
             return [ForecastPoint(value=round(float(v), 4)) for v in y_raw[:, 0]]
-        # Multivariate forecasts not yet shipped (Wave 2 multi-variate work).
-        # Returning the first variable keeps the shape contract; pilots that
-        # need full multivariate output should not request horizon at this stage.
+        # Multivariate output is not yet supported; return the first
+        # variable so the shape contract is preserved.
         return [ForecastPoint(value=round(float(row[0]), 4)) for row in y_raw]
 
 

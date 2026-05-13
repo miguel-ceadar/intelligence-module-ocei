@@ -1,18 +1,10 @@
-"""Task protocol + registry + the concrete ``BaseTask`` class.
+"""Task protocol, registry, and the concrete ``BaseTask``.
 
-A ``Task`` (the Protocol) is the contract — anything in the registry has
-``name``, ``train(req)``, ``predict(req)``, ``is_loaded()``. Most tasks
-will be instances of the concrete ``BaseTask`` dataclass below, which
-composes ``(data_loader, model)`` and handles the lifecycle — caching,
-lazy load, readiness probing, request glue.
-
-If a task type ever needs different lifecycle (e.g. anomaly tasks want
-a custom drift wiring), subclass ``BaseTask`` and override the relevant
-method. Don't subclass eagerly — empty subclasses are noise.
-
-Tasks are looked up by name. ``build_registry_from_config`` walks the
-typed ``cfg.tasks`` dict and dispatches each block to a per-kind
-builder under ``intelligence.tasks.builders``.
+A ``Task`` exposes ``name``, ``train(req)``, ``predict(req)``,
+``is_loaded()``. ``BaseTask`` composes a data loader with a model and
+handles caching, lazy load, and readiness. Tasks are looked up by
+name; ``build_registry_from_config`` dispatches each typed config
+block to a per-kind builder.
 """
 
 from __future__ import annotations
@@ -41,12 +33,9 @@ logger = logging.getLogger(__name__)
 
 @runtime_checkable
 class Task(Protocol):
-    """Duck-typed task contract.
-
-    Concrete tasks may expose more (``model_type``, ``has_drift``,
-    ``input_spec``, ``drift``); the registry surfaces what's there via
-    ``getattr`` defaults.
-    """
+    """Duck-typed task contract. Concrete tasks may expose more
+    attributes (``model_type``, ``has_drift``, ``input_spec``); the
+    registry surfaces them via ``getattr`` defaults."""
 
     name: str
 
@@ -99,51 +88,36 @@ def _safely(fn) -> bool:
         return False
 
 
-# ---- Concrete task --------------------------------------------------------
-
-
 @dataclass
 class BaseTask:
-    """Generic task: composes a data loader with a model.
+    """Composes a data loader with a model.
 
-    Works for any (task domain x model algorithm) pairing — forecast,
-    anomaly, classification — as long as the model and loader follow
-    their contracts. Subclass only when a task type needs different
-    lifecycle (e.g. a custom drift method); don't subclass for naming.
+    Works for any (data source x model algorithm) pairing as long as
+    both follow their contracts. Subclass only when the task needs
+    different lifecycle behaviour (see ``DriftDetectionTask``).
 
     Attributes:
         name: URL segment under ``/tasks/{name}/...``.
-        model: the per-algorithm implementation of the ``Model``
-            protocol (``fit`` / ``save_artifacts`` / ``load_artifacts``
-            / ``predict``).
+        model: implementation of the ``Model`` protocol, or ``None``
+            for tasks (like drift) that handle persistence themselves.
         data_loader: maps a ``DataSource`` to training components.
-        bento_name: artefact-store key. Defaults to ``name``; override
-            only to share a name with legacy code.
+        bento_name: artifact-store key; defaults to ``name``.
     """
 
     name: str
-    # ``model`` is the per-algorithm Model implementation. Optional
-    # because subclasses (e.g. ``DriftDetectionTask``) override both
-    # train and predict and don't use a Model at all.
     model: Model | None
     data_loader: Callable[[DataSource], dict]
     bento_name: str | None = None
     input_spec: InputSpec | None = None
-    # When True, predict serves artefacts whose stored input_spec is
-    # missing or doesn't match the task's spec. Default False — pulled
-    # artefacts that predate the contract are refused.
+    # When True, predict still serves an artifact whose stored
+    # input_spec is missing or doesn't match the task's spec.
     allow_unverified_models: bool = False
-    # Pin this task's predict path to a specific version. A request's
-    # ``model_version`` overrides this.
     pinned_version: str | None = None
-    # Cache resolved artefacts by version string, holding ``(loaded_dict,
-    # served_tag)``. ``"latest"`` is invalidated on each train (a new
-    # train shifts what ``latest`` means); pinned versions are immutable
-    # so their cache entries stay valid.
+    # Cache of resolved artifacts, keyed by version string. ``"latest"``
+    # is invalidated on each train; pinned versions are immutable.
     _cached_artifacts: dict[str, tuple[dict, str]] = field(
         default_factory=dict, init=False, repr=False
     )
-    # Bootstrap-on-startup state (see ``intelligence.tasks.bootstrap``).
     bootstrap_state: str = field(default="pending", init=False, repr=False)
     bootstrap_error: str | None = field(default=None, init=False, repr=False)
 
@@ -179,12 +153,11 @@ class BaseTask:
         return requested or self.pinned_version or "latest"
 
     def _load_artifact(self, version: str | None = None) -> tuple[dict | None, str | None]:
-        """Resolve a version and load its artefact into a dict.
+        """Resolve a version and load its artifact into a dict.
 
         Returns ``(loaded_dict, served_tag)`` on success, or
-        ``(None, None)`` when the artefact isn't in the local store.
-        The loaded dict is cached by the resolved version; ``latest``
-        is invalidated by :meth:`_invalidate` whenever ``train`` runs.
+        ``(None, None)`` when the artifact isn't in the local store.
+        Results are cached by resolved version.
         """
         resolved = self._resolve_version(version)
         if resolved in self._cached_artifacts:
@@ -197,13 +170,12 @@ class BaseTask:
         return loaded, saved.tag
 
     def _invalidate(self) -> None:
-        # A new train only shifts what ``:latest`` means; pinned versions
-        # are immutable so their cache entries stay valid.
+        # Only ``:latest`` shifts on a new train; pinned versions are immutable.
         self._cached_artifacts.pop("latest", None)
 
     def train(self, req: TrainRequest) -> TrainResponse:
-        # Descriptor dispatch is the loader's job — wrong kind raises
-        # ValueError inside ``data_loader``, which the API translates to 422.
+        # A wrong-kind data_source raises ValueError inside ``data_loader``,
+        # which the API translates to HTTP 422.
         components = self.data_loader(req.data_source)
         components["model_parameters"] = req.model_parameters
 
@@ -221,9 +193,7 @@ class BaseTask:
         return TrainResponse(model_tag=saved.tag, metrics=metrics)
 
     def predict(self, req: PredictRequest) -> PredictResponse:
-        # Validate request against the contract BEFORE loading the
-        # artefact — cheap rejection of obviously-bad requests, no
-        # store fetch needed.
+        # Validate the request before touching the store.
         if self.input_spec is not None:
             self.input_spec.validate(req.input_series)
             self.input_spec.validate_horizon(req.horizon)
@@ -241,58 +211,44 @@ class BaseTask:
         return PredictResponse(prediction=prediction, model_version=served)
 
     def _verify_artifact(self, loaded: dict) -> None:
-        """Refuse predict if the loaded artefact's stored contract
-        doesn't match this task's ``input_spec``.
-
-        The contract is what was written to ``input_spec.json`` at
-        train time (see :meth:`train` → ``model.save_artifacts``).
-        Pulled artefacts from before the contract existed have no
-        ``input_spec`` and are refused by default.
-
-        ``allow_unverified_models=True`` downgrades refusal to a
-        warning. Operationally a refusal is the same shape as "no
-        trained model" (503 from the API), so the caller knows to
-        train fresh or pull a matching artefact.
+        """Refuse predict if the loaded artifact's stored ``input_spec``
+        doesn't match the task's. ``allow_unverified_models=True``
+        downgrades refusal to a warning.
         """
         if self.input_spec is None:
-            return  # task has no contract to verify against
+            return
 
         stored = loaded.get("input_spec")
         if stored is None:
             if self.allow_unverified_models:
                 logger.warning(
-                    "task %s: serving unverified artefact (no input_spec)",
+                    "task %s: serving unverified artifact (no input_spec)",
                     self.name,
                 )
                 return
             raise FileNotFoundError(
-                f"unverified Bento for task {self.name!r}: stored artefact has no "
-                f"input_spec (saved before the contract existed). Train a fresh "
-                f"model or set allow_unverified_models=true (debugging only)."
+                f"artifact for task {self.name!r} has no input_spec; "
+                f"train a fresh model or pull one that carries an input_spec."
             )
 
         mismatch = _spec_mismatch(stored, self.input_spec)
         if mismatch is not None:
             if self.allow_unverified_models:
                 logger.warning(
-                    "task %s: serving artefact with mismatched input_spec (%s)",
+                    "task %s: serving artifact with mismatched input_spec (%s)",
                     self.name,
                     mismatch,
                 )
                 return
             raise FileNotFoundError(
-                f"Bento for task {self.name!r} has a mismatched input_spec: "
-                f"{mismatch}. Train a fresh model or set allow_unverified_models=true."
+                f"artifact for task {self.name!r} has a mismatched input_spec: "
+                f"{mismatch}. Train a fresh model or pull a matching one."
             )
 
 
 def _spec_mismatch(stored: InputSpec, expected: InputSpec) -> str | None:
-    """Return a short description of the first structural field that
-    doesn't match, or ``None`` if all three agree.
-
-    Only the fields that affect tensor shape are compared —
-    ``n_features``, ``feature_names``, ``steps_back``. ``value_range``
-    and ``units`` are descriptive and don't block.
+    """First shape-affecting field that disagrees, or ``None`` if all
+    three (``n_features``, ``feature_names``, ``steps_back``) match.
     """
     if stored.n_features != expected.n_features:
         return f"n_features {stored.n_features} != {expected.n_features}"
@@ -304,12 +260,9 @@ def _spec_mismatch(stored: InputSpec, expected: InputSpec) -> str | None:
 
 
 def build_registry_from_config(cfg: IntelligenceConfig) -> TaskRegistry:
-    """Build a registry from the typed ``cfg.tasks`` dict.
-
-    Iterates each ``(name, task_cfg)`` pair, dispatches on
-    ``task_cfg.kind`` via the builder registry, and registers the
-    resulting ``BaseTask``. Each builder body is where heavy imports
-    happen — unused kinds don't pull their model deps.
+    """Build a registry by dispatching each ``cfg.tasks`` block to its
+    per-kind builder. Heavy imports happen inside each builder, so
+    unused kinds don't pull their model dependencies.
     """
     from intelligence.tasks.builders import get_builder
 

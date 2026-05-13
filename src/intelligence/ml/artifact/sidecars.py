@@ -1,15 +1,11 @@
-"""Typed sidecar persistence — the small set of helpers each per-kind
-``save_artifacts`` reaches for. Centralised here so scaler / InputSpec
-/ JSON serialisation lives in *one* place rather than implicit-pickled
-across four model files.
+"""Typed save/load helpers used by each model's ``save_artifacts``.
 
-Security posture:
-  - sklearn scalers are restored via a strict class/module allowlist —
-    no arbitrary import. Fitted state is split into a JSON metadata file
-    (constructor params + non-array attributes) and an NPZ file
-    (numpy arrays). The NPZ is always loaded with ``allow_pickle=False``,
-    so even a tampered archive cannot smuggle pickled state.
-  - ``InputSpec`` round-trips through pydantic's JSON (not pickle).
+sklearn scalers are restored via a strict class/module allowlist (no
+arbitrary import). Fitted state is split into a JSON metadata file
+(constructor params + non-array attributes) and an NPZ file (numpy
+arrays). The NPZ is always loaded with ``allow_pickle=False``, so a
+tampered archive can't smuggle pickled state. ``InputSpec`` round-trips
+through pydantic JSON.
 """
 
 from __future__ import annotations
@@ -27,18 +23,12 @@ ALLOWED_SCALER_CLASSES = frozenset({"StandardScaler", "MinMaxScaler"})
 ALLOWED_SCALER_MODULE_PREFIX = "sklearn.preprocessing"
 
 
-# ---- InputSpec ------------------------------------------------------------
-
-
 def save_input_spec(dir_path: Path, spec: InputSpec, filename: str = "input_spec.json") -> None:
     (dir_path / filename).write_text(spec.model_dump_json())
 
 
 def load_input_spec(dir_path: Path, filename: str = "input_spec.json") -> InputSpec:
     return InputSpec.model_validate_json((dir_path / filename).read_text())
-
-
-# ---- Plain JSON dicts (metrics, arch, drift config, …) --------------------
 
 
 def save_json(dir_path: Path, filename: str, data: dict) -> None:
@@ -49,21 +39,12 @@ def load_json(dir_path: Path, filename: str) -> dict:
     return json.loads((dir_path / filename).read_text())
 
 
-# ---- sklearn scalers ------------------------------------------------------
-
-
 def save_sklearn_scaler(dir_path: Path, role: str, scaler: Any) -> None:
     """Persist a fitted sklearn scaler as ``{role}.json`` (params +
     non-numeric attrs) plus ``{role}.npz`` (numeric numpy arrays).
 
-    Numeric arrays go to the NPZ so we can load with
-    ``allow_pickle=False``. Non-numeric arrays (e.g.
-    ``feature_names_in_`` — sklearn stores it as an object array of
-    column names) go into the JSON as ``{"__ndarray__": ..., "values":
-    [...], "dtype": ...}``, since an object-dtype array in an NPZ would
-    force ``allow_pickle=True`` to load. The boundary that matters is
-    "no pickle on the load path"; preserving dtype info keeps round-trip
-    identity for sklearn's name-matching checks.
+    Object-dtype arrays (e.g. ``feature_names_in_``) go into the JSON
+    rather than the NPZ so the load path can stay ``allow_pickle=False``.
     """
     cls = type(scaler)
     state = (
@@ -100,7 +81,7 @@ def save_sklearn_scaler(dir_path: Path, role: str, scaler: Any) -> None:
 def load_sklearn_scaler(dir_path: Path, role: str) -> Any:
     """Reconstruct a fitted sklearn scaler from its sidecar pair.
 
-    Refuses any class not in :data:`ALLOWED_SCALER_CLASSES` or any
+    Refuses any class not in ``ALLOWED_SCALER_CLASSES`` or any
     ``module`` outside ``sklearn.preprocessing`` — the JSON could
     otherwise point at an arbitrary import path.
     """
@@ -122,17 +103,12 @@ def load_sklearn_scaler(dir_path: Path, role: str) -> Any:
     scaler = cls(**meta.get("params", {}))
     for key, value in meta.get("attrs", {}).items():
         if isinstance(value, dict) and value.get("__ndarray__"):
-            # Object/string array round-trip — restore with the original
-            # dtype so sklearn's feature-name checks see the same type
-            # they wrote.
             arr = np.array(value["values"], dtype=value.get("dtype"))
             setattr(scaler, key, arr)
         else:
             setattr(scaler, key, value)
 
-    # ``allow_pickle=False`` is the security boundary: an attacker who
-    # tampers with the NPZ to embed an object-array (pickle) payload
-    # will trip this load, not silently execute the payload.
+    # allow_pickle=False — refuse any object/pickle payload smuggled in.
     with np.load(dir_path / f"{role}.npz", allow_pickle=False) as npz:
         for key in npz.files:
             setattr(scaler, key, npz[key])
@@ -140,22 +116,15 @@ def load_sklearn_scaler(dir_path: Path, role: str) -> Any:
     return scaler
 
 
-# ---- internals ------------------------------------------------------------
-
-
 def _is_safe_numeric_dtype(dtype: np.dtype) -> bool:
-    """True if a numpy dtype can round-trip through NPZ without object
-    arrays (i.e. without ever needing ``allow_pickle=True``)."""
+    """True if a dtype round-trips through NPZ without object arrays."""
     return np.issubdtype(dtype, np.number) or np.issubdtype(dtype, np.bool_)
 
 
 def _to_jsonable(value: Any) -> Any:
-    """Coerce numpy scalars / tuples to JSON-native types.
-
-    Used for the scaler ``attrs`` dict and ``get_params()`` output;
-    deliberately conservative — anything we don't recognise is returned
-    untouched so ``json.dump`` raises a clear ``TypeError`` rather than
-    silently dropping data.
+    """Coerce numpy scalars and tuples to JSON-native types. Anything
+    unrecognised is returned untouched so ``json.dump`` raises rather
+    than silently dropping data.
     """
     if isinstance(value, dict):
         return {k: _to_jsonable(v) for k, v in value.items()}

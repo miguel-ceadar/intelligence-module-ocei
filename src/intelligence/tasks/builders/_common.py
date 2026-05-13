@@ -1,11 +1,4 @@
-"""Shared bits used by every per-kind builder.
-
-Builders are mechanically similar — they all take a typed config block,
-construct a ``BaseTask`` (or subclass), and wire it to a loader. The
-``InputSpec`` construction is identical in shape across kinds; centralising
-it here keeps the per-kind files focused on the kind-specific knobs
-(which model class, which prepare, which subclass).
-"""
+"""Helpers shared by every per-kind builder."""
 
 from __future__ import annotations
 
@@ -21,14 +14,12 @@ def build_input_spec(
 ) -> InputSpec:
     """Build a univariate ``InputSpec`` for a task.
 
-    Every shipped kind is single-feature: one PromQL series in, one
-    forecast value out. ``value_range`` is descriptive but enforced — a
-    predict request outside the range gets ``422`` before the model
-    runs. Pass ``None`` to disable the range check.
-
-    ``max_horizon`` bounds the request horizon. ``None`` (default) means
-    unbounded — used by ARIMA (refits each call) and XGB (recursive).
-    LSTM is direct multi-output and clamps to its trained ``output_size``.
+    Every built-in kind is single-feature: one PromQL series in, one
+    forecast value out. ``value_range`` is enforced — a predict
+    request outside the range returns ``422`` before the model runs;
+    pass ``None`` to disable. ``max_horizon`` bounds the request
+    horizon; ``None`` means unbounded (used by ARIMA and XGB). LSTM
+    clamps to its trained ``output_size``.
     """
     return InputSpec(
         n_features=1,
