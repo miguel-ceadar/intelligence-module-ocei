@@ -76,6 +76,7 @@ jobs:
             type=raw,value=latest,enable=${{ startsWith(github.ref, 'refs/tags/v') }}
 
       - name: Build and push (multi-arch)
+        id: build
         uses: docker/build-push-action@v6
         with:
           context: .
@@ -86,6 +87,25 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
+          # SBOM (SPDX) and SLSA provenance attestations, attached to the
+          # pushed manifest as OCI artifacts. Operators can fetch them
+          # via `docker buildx imagetools inspect --format ... <tag>`.
+          sbom: true
+          provenance: true
+
+      - name: Scan pushed image for HIGH/CRITICAL CVEs (Trivy)
+        # Runs after push so the SBOM-attested image is in the registry
+        # by the time the scan reports. The job fails on findings — the
+        # tag is published but the release status is red, so pilots see
+        # the failure on the GitHub release page.
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          image-ref: ghcr.io/${{ steps.owner.outputs.value }}/${{ env.IMAGE_NAME }}@${{ steps.build.outputs.digest }}
+          format: table
+          exit-code: "1"
+          ignore-unfixed: true
+          severity: HIGH,CRITICAL
+          vuln-type: os,library
 
   publish-chart:
     runs-on: ubuntu-latest
