@@ -74,7 +74,7 @@ def test_kind_is_open_string_so_new_kinds_need_no_manifest_edit():
 
 
 def test_validate_rejects_old_schema_version():
-    with pytest.raises(ManifestError, match="schema_version"):
+    with pytest.raises(ManifestError, match=r"schema_version"):
         validate_manifest_dict(
             {
                 "schema_version": 0,
@@ -86,7 +86,7 @@ def test_validate_rejects_old_schema_version():
 
 
 def test_validate_rejects_future_schema_version():
-    with pytest.raises(ManifestError, match="schema_version"):
+    with pytest.raises(ManifestError, match=r"schema_version"):
         validate_manifest_dict(
             {
                 "schema_version": 999,
@@ -115,7 +115,7 @@ def test_validate_rejects_pickle_extension_in_files():
 
 
 def test_validate_rejects_path_traversal_in_filename():
-    with pytest.raises(ManifestError, match="traversal|path separator"):
+    with pytest.raises(ManifestError, match=r"traversal|path separator"):
         validate_manifest_dict(
             {
                 "schema_version": SCHEMA_VERSION,
@@ -168,7 +168,7 @@ def test_validate_directory_rejects_undeclared_stowaway(tmp_path):
     manifest = write_manifest(tmp_path, "arima", {"model": "arima.json"})
     (tmp_path / "arima.json").write_text("{}")
     (tmp_path / "stowaway.json").write_text("{}")
-    with pytest.raises(ManifestError, match="stowaway.json"):
+    with pytest.raises(ManifestError, match=r"stowaway\.json"):
         validate_artifact_directory(tmp_path, manifest)
 
 
@@ -204,7 +204,7 @@ def test_read_manifest_roundtrips_through_disk(tmp_path):
 
 
 def test_read_manifest_raises_when_missing(tmp_path):
-    with pytest.raises(ManifestError, match="manifest.json missing"):
+    with pytest.raises(ManifestError, match=r"manifest\.json missing"):
         read_manifest(tmp_path)
 
 

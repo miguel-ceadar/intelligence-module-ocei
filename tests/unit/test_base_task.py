@@ -143,9 +143,7 @@ def test_train_threads_prometheus_descriptor_through_loader():
         save.return_value = _fake_saved("fake:v1")
         result = t.train(
             TrainRequest(
-                data_source=PrometheusDataSource(
-                    kind="prometheus", window="1h", step="1m"
-                ),
+                data_source=PrometheusDataSource(kind="prometheus", window="1h", step="1m"),
                 model_parameters={},
             )
         )
@@ -162,9 +160,7 @@ def test_predict_threads_horizon_into_model(task):
         task.predict(api_schemas.PredictRequest(input_series={"x": [1.0]}, horizon=4))
 
     call = task.model.predict.call_args
-    assert call.kwargs.get("horizon") == 4 or (
-        len(call.args) >= 3 and call.args[2] == 4
-    )
+    assert call.kwargs.get("horizon") == 4 or (len(call.args) >= 3 and call.args[2] == 4)
 
 
 def test_predict_rejects_horizon_above_input_spec_max():
@@ -174,9 +170,7 @@ def test_predict_rejects_horizon_above_input_spec_max():
     from intelligence.api import schemas as api_schemas
     from intelligence.tasks.contracts import ContractViolation, InputSpec
 
-    spec = InputSpec(
-        n_features=1, feature_names=["x"], steps_back=1, max_horizon=2
-    )
+    spec = InputSpec(n_features=1, feature_names=["x"], steps_back=1, max_horizon=2)
     t = BaseTask(
         name="t",
         model=_make_model(),
@@ -192,9 +186,7 @@ def test_predict_allows_horizon_within_max(task):
     from intelligence.api import schemas as api_schemas
     from intelligence.tasks.contracts import InputSpec
 
-    spec = InputSpec(
-        n_features=1, feature_names=["x"], steps_back=1, max_horizon=3
-    )
+    spec = InputSpec(n_features=1, feature_names=["x"], steps_back=1, max_horizon=3)
     # ``allow_unverified_models=True`` skips the input_spec check — the
     # fake loaded artefact here doesn't carry one.
     t = BaseTask(

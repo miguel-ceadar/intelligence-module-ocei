@@ -133,7 +133,7 @@ def test_pull_rejects_missing_manifest(mock_snapshot, tmp_path, monkeypatch):
 
     from intelligence.api.model_repo import pull_from_hf
 
-    with pytest.raises(ManifestError, match="manifest.json missing"):
+    with pytest.raises(ManifestError, match=r"manifest\.json missing"):
         pull_from_hf("missing:nope", "CeADAR/intelligence-bentos")
 
 
@@ -162,7 +162,7 @@ def test_pull_rejects_stowaway_pickle_file(mock_snapshot, tmp_path, monkeypatch)
 
     from intelligence.api.model_repo import pull_from_hf
 
-    with pytest.raises(ManifestError, match="malicious.pkl"):
+    with pytest.raises(ManifestError, match=r"malicious\.pkl"):
         pull_from_hf("stowaway:nope", "CeADAR/intelligence-bentos")
 
 
@@ -226,7 +226,7 @@ def test_pull_rejects_manifest_with_traversal_filename(mock_snapshot, tmp_path, 
 
     from intelligence.api.model_repo import pull_from_hf
 
-    with pytest.raises(ManifestError, match="traversal|path separator"):
+    with pytest.raises(ManifestError, match=r"traversal|path separator"):
         pull_from_hf("traversal:nope", "CeADAR/intelligence-bentos")
 
 

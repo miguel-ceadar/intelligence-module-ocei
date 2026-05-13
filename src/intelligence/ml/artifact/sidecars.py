@@ -66,8 +66,8 @@ def save_sklearn_scaler(dir_path: Path, role: str, scaler: Any) -> None:
     identity for sklearn's name-matching checks.
     """
     cls = type(scaler)
-    state = dict(scaler.__getstate__()) if hasattr(scaler, "__getstate__") else dict(
-        scaler.__dict__
+    state = (
+        dict(scaler.__getstate__()) if hasattr(scaler, "__getstate__") else dict(scaler.__dict__)
     )
 
     arrays: dict[str, np.ndarray] = {}

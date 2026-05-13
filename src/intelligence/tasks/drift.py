@@ -78,11 +78,7 @@ class DriftDetectionTask(BaseTask):
         reference_df: pd.DataFrame = components["reference_df"]
         column_names: list[str] = list(
             components.get("drift_columns")
-            or [
-                c
-                for c in reference_df.columns
-                if c.lower() not in {"time", "timestamp", "date"}
-            ]
+            or [c for c in reference_df.columns if c.lower() not in {"time", "timestamp", "date"}]
         )
         metrics = {"reference_size": len(reference_df)}
         artifacts = {
@@ -122,9 +118,7 @@ class DriftDetectionTask(BaseTask):
         save_json(
             dest,
             "metrics.json",
-            artifacts.get(
-                "model_metrics", {"reference_size": len(ref)}
-            ),
+            artifacts.get("model_metrics", {"reference_size": len(ref)}),
         )
 
         files: dict[str, str] = {
@@ -146,9 +140,7 @@ class DriftDetectionTask(BaseTask):
         try:
             import nannyml as nml
         except ImportError as e:  # pragma: no cover — import gate
-            raise ImportError(
-                "drift task requires the `nannyml` package"
-            ) from e
+            raise ImportError("drift task requires the `nannyml` package") from e
 
         from intelligence.ml.artifact.sidecars import (
             load_input_spec,
@@ -240,9 +232,7 @@ class DriftDetectionTask(BaseTask):
             model_version=served,
         )
 
-    def _load_drift_artifact(
-        self, version: str | None = None
-    ) -> tuple[dict | None, str | None]:
+    def _load_drift_artifact(self, version: str | None = None) -> tuple[dict | None, str | None]:
         """Drift override of :meth:`BaseTask._load_artifact` — calls
         ``self.load_artifacts`` (which is on this task, not on a Model)
         and caches the loaded dict under the resolved version."""

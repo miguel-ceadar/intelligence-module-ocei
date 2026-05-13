@@ -72,9 +72,7 @@ def test_lstm_predict_multi_horizon():
     from intelligence.ml.models.lstm import LstmModel, make_lstm_prepare
 
     horizon = 3
-    prep = make_lstm_prepare(
-        look_back=6, num_variables=1, batch_size=16, horizon=horizon
-    )
+    prep = make_lstm_prepare(look_back=6, num_variables=1, batch_size=16, horizon=horizon)
     comps = prep(_synthetic_cpu(n=300))
     comps["model_parameters"] = {
         "input_size": 1,
@@ -233,13 +231,13 @@ def test_lstm_load_artifacts_restores_input_spec(lstm_artifacts_fit, tmp_path):
 
 @pytest.mark.slow
 def test_lstm_files_map_declares_only_safe_extensions(lstm_artifacts_fit, tmp_path):
-    from pathlib import Path as _P
+    from pathlib import Path
 
     from intelligence.ml.artifact.manifest import ALLOWED_EXTENSIONS
 
     model, artifacts, _ = lstm_artifacts_fit
     files = model.save_artifacts(artifacts, tmp_path)
     for role, fname in files.items():
-        assert _P(fname).suffix.lower() in ALLOWED_EXTENSIONS, (
+        assert Path(fname).suffix.lower() in ALLOWED_EXTENSIONS, (
             f"role {role!r} declares {fname!r} with disallowed extension"
         )

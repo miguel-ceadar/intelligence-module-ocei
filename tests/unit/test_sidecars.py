@@ -57,7 +57,9 @@ def test_input_spec_value_range_preserves_tuple_shape(tmp_path):
     range-check (which destructures into ``(lo, hi)``) would behave
     differently between fresh-trained and loaded models."""
     spec = InputSpec(
-        n_features=1, feature_names=["cpu"], steps_back=1,
+        n_features=1,
+        feature_names=["cpu"],
+        steps_back=1,
         value_range={"cpu": (0.0, 1.0)},
     )
     save_input_spec(tmp_path, spec)
@@ -120,12 +122,14 @@ def test_scaler_writes_two_named_files(tmp_path):
 def test_scaler_loader_rejects_unknown_class(tmp_path):
     """Tampered JSON points to a class we don't ship — refuse."""
     (tmp_path / "scaler.json").write_text(
-        json.dumps({
-            "class": "RobustScaler",
-            "module": "sklearn.preprocessing",
-            "params": {},
-            "attrs": {},
-        })
+        json.dumps(
+            {
+                "class": "RobustScaler",
+                "module": "sklearn.preprocessing",
+                "params": {},
+                "attrs": {},
+            }
+        )
     )
     np.savez(tmp_path / "scaler.npz")
     with pytest.raises(ValueError, match="unsupported scaler"):
@@ -135,12 +139,14 @@ def test_scaler_loader_rejects_unknown_class(tmp_path):
 def test_scaler_loader_rejects_non_sklearn_module(tmp_path):
     """Tampered JSON points outside sklearn — refuse before importing."""
     (tmp_path / "scaler.json").write_text(
-        json.dumps({
-            "class": "StandardScaler",
-            "module": "os",
-            "params": {},
-            "attrs": {},
-        })
+        json.dumps(
+            {
+                "class": "StandardScaler",
+                "module": "os",
+                "params": {},
+                "attrs": {},
+            }
+        )
     )
     np.savez(tmp_path / "scaler.npz")
     with pytest.raises(ValueError, match="module"):

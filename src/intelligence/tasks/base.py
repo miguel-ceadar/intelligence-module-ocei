@@ -106,7 +106,7 @@ def _safely(fn) -> bool:
 class BaseTask:
     """Generic task: composes a data loader with a model.
 
-    Works for any (task domain × model algorithm) pairing — forecast,
+    Works for any (task domain x model algorithm) pairing — forecast,
     anomaly, classification — as long as the model and loader follow
     their contracts. Subclass only when a task type needs different
     lifecycle (e.g. a custom drift method); don't subclass for naming.
@@ -178,9 +178,7 @@ class BaseTask:
         """Resolve the version to load. Precedence: request → task pin → latest."""
         return requested or self.pinned_version or "latest"
 
-    def _load_artifact(
-        self, version: str | None = None
-    ) -> tuple[dict | None, str | None]:
+    def _load_artifact(self, version: str | None = None) -> tuple[dict | None, str | None]:
         """Resolve a version and load its artefact into a dict.
 
         Returns ``(loaded_dict, served_tag)`` on success, or

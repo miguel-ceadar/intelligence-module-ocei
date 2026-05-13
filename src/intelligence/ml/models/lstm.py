@@ -187,9 +187,7 @@ class LstmModel:
         look_back = int(artifacts["look_back"])
         num_variables = int(artifacts["num_variables"])
         scaler = artifacts["scaler_obj"]
-        trained_horizon = int(
-            artifacts.get("horizon", artifacts.get("output_size", 1))
-        )
+        trained_horizon = int(artifacts.get("horizon", artifacts.get("output_size", 1)))
 
         if horizon > trained_horizon:
             raise ValueError(

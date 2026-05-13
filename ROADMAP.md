@@ -87,9 +87,6 @@ Independent track, can slot in earlier if a pilot specifically asks.
 - **OpenTelemetry source.** Lib-side change in `src/intelligence/telemetry/`,
   isolated, low risk. Extends `TelemetryConfig.source` and adds a
   `TelemetrySource` implementation alongside `static` and `prometheus`.
-- **Prophet kind** — only if a pilot specifically asks. Upstream is
-  effectively de-staffed and the use cases are subsumed by multivariate
-  XGB and TFT with calendar features. Default position: skip.
 
 ## Explicitly out of scope
 

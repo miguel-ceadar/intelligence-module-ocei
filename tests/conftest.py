@@ -9,9 +9,24 @@ skips flip to passes. ``--strict-markers`` keeps marker typos honest.
 from __future__ import annotations
 
 import os
+import sys
 from pathlib import Path
 
 import pytest
+
+# Make ``intelligence.*`` importable without relying on the editable-install
+# ``.pth`` file. On macOS the ``.venv/`` directory is marked hidden, the
+# UF_HIDDEN flag propagates to the ``.pth`` files inside, and CPython 3.12+
+# silently skips hidden ``.pth`` files (security check from CPython #113659).
+# The net effect is that editable installs in dot-prefixed venvs randomly
+# break with ``ModuleNotFoundError: No module named 'intelligence'``. This
+# path injection makes the test suite robust to that quirk regardless of
+# venv layout, OS, or build backend. Production (Docker / Helm) is
+# unaffected — it ships non-editable wheels with no ``.pth`` in the loop.
+# Upstream tracking: astral-sh/uv#16977, python/cpython#148121.
+_SRC = Path(__file__).resolve().parent.parent / "src"
+if _SRC.is_dir() and str(_SRC) not in sys.path:
+    sys.path.insert(0, str(_SRC))
 
 
 @pytest.fixture(scope="session", autouse=True)

@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import numpy as np
 import pandas as pd
+import pytest
 
 from intelligence.api.schemas import (
     PredictRequest,
@@ -141,9 +142,6 @@ def test_drift_task_is_registered_via_builder(tmp_path, monkeypatch):
 # once per artefact load.
 
 
-import pytest
-
-
 @pytest.fixture
 def drift_artifacts_fit():
     """A fresh ``(task, artifacts, metrics, reference)`` quad from
@@ -160,9 +158,7 @@ def drift_artifacts_fit():
         metric="jensen_shannon",
     )
 
-    artifacts, metrics = task.fit(
-        {"reference_df": reference, "drift_columns": ["cpu"]}
-    )
+    artifacts, metrics = task.fit({"reference_df": reference, "drift_columns": ["cpu"]})
     return task, artifacts, metrics, reference
 
 
@@ -200,9 +196,7 @@ def test_drift_save_artifacts_includes_input_spec_when_present(drift_artifacts_f
     from intelligence.tasks.contracts import InputSpec
 
     task, artifacts, _, _ = drift_artifacts_fit
-    artifacts["input_spec"] = InputSpec(
-        n_features=1, feature_names=["cpu"], steps_back=12
-    )
+    artifacts["input_spec"] = InputSpec(n_features=1, feature_names=["cpu"], steps_back=12)
     files = task.save_artifacts(artifacts, tmp_path)
     assert files.get("input_spec") == "input_spec.json"
     assert (tmp_path / "input_spec.json").exists()
@@ -250,9 +244,7 @@ def test_drift_load_artifacts_restores_input_spec(drift_artifacts_fit, tmp_path)
     from intelligence.tasks.contracts import InputSpec
 
     task, artifacts, _, _ = drift_artifacts_fit
-    artifacts["input_spec"] = InputSpec(
-        n_features=1, feature_names=["cpu"], steps_back=12
-    )
+    artifacts["input_spec"] = InputSpec(n_features=1, feature_names=["cpu"], steps_back=12)
     task.save_artifacts(artifacts, tmp_path)
 
     loaded = task.load_artifacts(tmp_path)
@@ -261,13 +253,13 @@ def test_drift_load_artifacts_restores_input_spec(drift_artifacts_fit, tmp_path)
 
 
 def test_drift_files_map_declares_only_safe_extensions(drift_artifacts_fit, tmp_path):
-    from pathlib import Path as _P
+    from pathlib import Path
 
     from intelligence.ml.artifact.manifest import ALLOWED_EXTENSIONS
 
     task, artifacts, _, _ = drift_artifacts_fit
     files = task.save_artifacts(artifacts, tmp_path)
     for role, fname in files.items():
-        assert _P(fname).suffix.lower() in ALLOWED_EXTENSIONS, (
+        assert Path(fname).suffix.lower() in ALLOWED_EXTENSIONS, (
             f"role {role!r} declares {fname!r} with disallowed extension"
         )

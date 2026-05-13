@@ -92,7 +92,7 @@ def test_save_refuses_undeclared_stowaway():
         (path / "stowaway.json").write_text("{}")  # not declared in returned map
         return {"thing": "thing.json"}
 
-    with pytest.raises(ManifestError, match="stowaway.json"):
+    with pytest.raises(ManifestError, match=r"stowaway\.json"):
         save_artifact("stowaway_check", "arima", write_fn)
 
 
@@ -140,7 +140,7 @@ def test_import_artifact_rejects_stowaway_in_source(tmp_path):
     (source / "stray.json").write_text("{}")
     write_manifest(source, "arima", {"thing": "thing.json"})
 
-    with pytest.raises(ManifestError, match="stray.json"):
+    with pytest.raises(ManifestError, match=r"stray\.json"):
         import_artifact("rejected", source)
 
 

@@ -107,8 +107,7 @@ def validate_manifest_dict(data: dict) -> Manifest:
         raise ManifestError(f"manifest schema invalid: {e}") from e
     if manifest.schema_version != SCHEMA_VERSION:
         raise ManifestError(
-            f"manifest schema_version {manifest.schema_version} != "
-            f"supported {SCHEMA_VERSION}"
+            f"manifest schema_version {manifest.schema_version} != supported {SCHEMA_VERSION}"
         )
     for fname in manifest.files.values():
         _check_filename(fname)
@@ -127,8 +126,7 @@ def validate_artifact_directory(path: Path, manifest: Manifest) -> None:
     for entry in path.iterdir():
         if entry.is_dir():
             raise ManifestError(
-                f"artefact directory must be flat; subdirectory not allowed: "
-                f"{entry.name!r}"
+                f"artefact directory must be flat; subdirectory not allowed: {entry.name!r}"
             )
         if entry.name not in declared:
             raise ManifestError(
@@ -137,9 +135,7 @@ def validate_artifact_directory(path: Path, manifest: Manifest) -> None:
 
     for role, fname in manifest.files.items():
         if not (path / fname).exists():
-            raise ManifestError(
-                f"manifest declares role {role!r} → {fname!r}, but file is missing"
-            )
+            raise ManifestError(f"manifest declares role {role!r} → {fname!r}, but file is missing")
 
 
 def read_manifest(path: Path) -> Manifest:

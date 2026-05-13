@@ -77,9 +77,6 @@ async def lifespan(_app: FastAPI):
     synchronously so ``/readyz`` returns 503 even before the event loop
     ticks the coroutine.
 
-    Replaces the deprecated ``@app.on_event("startup")`` pattern. No
-    shutdown work — fire-and-forget bootstrap tasks are abandoned on
-    process exit by design.
     """
     from intelligence.tasks.bootstrap import bootstrap_task
 

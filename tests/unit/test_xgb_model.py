@@ -183,9 +183,7 @@ def test_xgb_load_artifacts_round_trips_full_state(xgb_artifacts_fit, tmp_path):
 
     # Native xgboost UBJ round-trip preserves prediction output exactly.
     np.testing.assert_allclose(
-        artifacts["regressor"].predict(
-            artifacts["scaler_X"].transform(sample)
-        ),
+        artifacts["regressor"].predict(artifacts["scaler_X"].transform(sample)),
         loaded["regressor"].predict(loaded["scaler_X"].transform(sample)),
     )
 
@@ -194,9 +192,7 @@ def test_xgb_load_artifacts_restores_input_spec(xgb_artifacts_fit, tmp_path):
     from intelligence.tasks.contracts import InputSpec
 
     model, artifacts, _, _ = xgb_artifacts_fit
-    artifacts["input_spec"] = InputSpec(
-        n_features=1, feature_names=["cpu"], steps_back=6
-    )
+    artifacts["input_spec"] = InputSpec(n_features=1, feature_names=["cpu"], steps_back=6)
     model.save_artifacts(artifacts, tmp_path)
 
     loaded = model.load_artifacts(tmp_path)
@@ -205,13 +201,13 @@ def test_xgb_load_artifacts_restores_input_spec(xgb_artifacts_fit, tmp_path):
 
 
 def test_xgb_files_map_declares_only_safe_extensions(xgb_artifacts_fit, tmp_path):
-    from pathlib import Path as _P
+    from pathlib import Path
 
     from intelligence.ml.artifact.manifest import ALLOWED_EXTENSIONS
 
     model, artifacts, _, _ = xgb_artifacts_fit
     files = model.save_artifacts(artifacts, tmp_path)
     for role, fname in files.items():
-        assert _P(fname).suffix.lower() in ALLOWED_EXTENSIONS, (
+        assert Path(fname).suffix.lower() in ALLOWED_EXTENSIONS, (
             f"role {role!r} declares {fname!r} with disallowed extension"
         )

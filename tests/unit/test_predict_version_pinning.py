@@ -103,13 +103,9 @@ def test_pinned_versions_cached_separately_from_latest():
     def by_tag(tag: str) -> SavedArtifact:
         return _fake_saved("v0") if tag.endswith(":v0") else _fake_saved("v1")
 
-    with mock.patch(
-        "intelligence.tasks.base.get_artifact_by_tag", side_effect=by_tag
-    ) as get:
+    with mock.patch("intelligence.tasks.base.get_artifact_by_tag", side_effect=by_tag) as get:
         task.predict(PredictRequest(input_series={"x": [1.0]}))  # caches latest=v1
-        task.predict(
-            PredictRequest(input_series={"x": [1.0]}, model_version="v0")
-        )  # caches v0
+        task.predict(PredictRequest(input_series={"x": [1.0]}, model_version="v0"))  # caches v0
         # _invalidate clears only :latest, not v0
         task._invalidate()
         task.predict(

@@ -54,9 +54,7 @@ def test_versions_endpoint_returns_empty_list_when_no_training_has_happened(clie
     train shouldn't see an error."""
     if "cpu_forecast_arima" not in api.registry:
         pytest.skip("cpu_forecast_arima not registered in this config")
-    with mock.patch(
-        "intelligence.api.service.list_artifacts_by_name", return_value=[]
-    ):
+    with mock.patch("intelligence.api.service.list_artifacts_by_name", return_value=[]):
         resp = client.get("/tasks/cpu_forecast_arima/versions")
     assert resp.status_code == 200
     body = resp.json()

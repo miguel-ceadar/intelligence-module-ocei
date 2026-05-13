@@ -175,9 +175,7 @@ def test_arima_load_artifacts_restores_input_spec(arima_artifacts_fit, tmp_path)
     from intelligence.tasks.contracts import InputSpec
 
     model, artifacts, _ = arima_artifacts_fit
-    artifacts["input_spec"] = InputSpec(
-        n_features=1, feature_names=["cpu"], steps_back=1
-    )
+    artifacts["input_spec"] = InputSpec(n_features=1, feature_names=["cpu"], steps_back=1)
     model.save_artifacts(artifacts, tmp_path)
 
     loaded = model.load_artifacts(tmp_path)
@@ -203,13 +201,13 @@ def test_arima_files_map_declares_only_safe_extensions(arima_artifacts_fit, tmp_
     """Sanity: every filename the save returns is an extension the
     manifest layer would accept. Catches typos before they hit the
     manifest validation."""
+    from pathlib import Path
+
     from intelligence.ml.artifact.manifest import ALLOWED_EXTENSIONS
 
     model, artifacts, _ = arima_artifacts_fit
     files = model.save_artifacts(artifacts, tmp_path)
     for role, fname in files.items():
-        from pathlib import Path as _P
-
-        assert _P(fname).suffix.lower() in ALLOWED_EXTENSIONS, (
+        assert Path(fname).suffix.lower() in ALLOWED_EXTENSIONS, (
             f"role {role!r} declares {fname!r} with disallowed extension"
         )

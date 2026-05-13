@@ -1,4 +1,4 @@
-# CPU forecasting — four tasks against your Prometheus.
+# CPU forecasting — four tasks against Prometheus endpoint.
 # Override the endpoint via INTELLIGENCE_TELEMETRY__PROMETHEUS__ENDPOINT
 # at deploy time, or edit it inline.
 
