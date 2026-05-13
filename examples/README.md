@@ -15,7 +15,7 @@ complete file you can mount into the service.
 | [`cpu_forecast/`](cpu_forecast/) | CPU utilisation forecasting + drift detection. The canonical example — four task kinds against the same Prometheus query. |
 | [`mem_forecast/`](mem_forecast/) | Memory utilisation forecasting. Same model kinds, different PromQL — illustrates "swap the metric, keep the algorithms." |
 | [`k8s_cluster_metrics/`](k8s_cluster_metrics/) | Cluster-wide and namespace-scoped metrics from a typical kube-prometheus-stack deployment. PromQL recipes for node + pod CPU / memory. |
-| [`energy_forecast/`](energy_forecast/) | Energy-consumption forecasting pattern. Stub — needs real data; ships the configuration shape only. |
+| [`energy_forecast/`](energy_forecast/) | Energy-consumption forecasting against any watts-producing exporter. Ships a PromQL recipe table covering Kepler, IPMI, RAPL, PDU SNMP, smart-plugs and Redfish. |
 
 ## How to run one
 

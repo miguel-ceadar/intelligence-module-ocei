@@ -1,9 +1,9 @@
-# Energy forecasting — template configuration.
-#
-# Ships the shape, not a runnable demo: we don't yet have a representative
-# energy CSV bundled for static mode, and the PromQL below assumes a
-# Kepler-instrumented cluster (or equivalent RAPL exporter). See the
-# README for what's still needed before this is end-to-end testable.
+# Energy forecasting — four tasks against an energy metric.
+# Defaults to Kepler (eBPF) PromQL. See README.md for alternatives
+# (IPMI exporter, RAPL via node-exporter, PDU via snmp_exporter,
+# smart-plug exporters, Redfish). Override the endpoint via
+# INTELLIGENCE_TELEMETRY__PROMETHEUS__ENDPOINT at deploy time, or
+# edit it inline.
 
 intelligence:
   telemetry:
