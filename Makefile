@@ -1,5 +1,6 @@
 .PHONY: install install-dev install-legacy lint format test test-fast test-integration clean \
-        up-demo down-demo logs-demo smoke e2e up-dev down-dev e2e-dev chart-lint chart-template
+        up-demo down-demo logs-demo smoke e2e stress e2e-stress \
+        up-dev down-dev e2e-dev chart-lint chart-template
 
 # The compose stack is a DEMO only (image + bundled prometheus + node-exporter
 # for "see it work in 3 minutes"). Pilots deploy via the Helm chart (k8s) or
@@ -59,6 +60,21 @@ smoke:
 
 e2e: up-demo
 	uv run pytest -m smoke -v || ($(COMPOSE_DEMO) logs intelligence; exit 1)
+
+# Stress runs against the same compose stack as `make e2e` — the demo
+# Prometheus retention is 12h, so leave the stack up for at least 15
+# minutes before running stress (some tests train against 6h of
+# history). Tune via STRESS_PREDICT_LOOPS, STRESS_LONG_WINDOW etc; see
+# the docstring on tests/smoke/test_stress.py.
+stress:
+	uv run pytest -m stress -v -s
+
+# One-shot: boot the stack, run quick smoke, then heavier stress. For
+# overnight: `make up-demo`, leave for hours, then `make stress` when
+# you want to exercise the long-window paths.
+e2e-stress: up-demo
+	uv run pytest -m smoke -v || ($(COMPOSE_DEMO) logs intelligence; exit 1)
+	uv run pytest -m stress -v -s || ($(COMPOSE_DEMO) logs intelligence; exit 1)
 
 # --- Dev overlay (build image from local sources) -----------------------------
 # Contributor path: rebuild the image and run the demo stack against the

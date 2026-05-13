@@ -111,11 +111,12 @@ quote-style = "double"
 testpaths = ["tests"]
 # Smoke tests need a running compose stack — excluded by default. Run with
 # `pytest -m smoke` (or `make smoke` / `make e2e`).
-addopts = "-ra --strict-markers --strict-config -m 'not smoke'"
+addopts = "-ra --strict-markers --strict-config -m 'not smoke and not stress'"
 markers = [
   "integration: spins up the BentoML service in-process; slower",
   "slow: takes more than ~5 seconds",
   "smoke: end-to-end against a running compose stack; requires docker compose up",
+  "stress: heavier end-to-end suite — long-window training + predict loops + multi-hour soak. Requires a stack that has been up long enough for Prometheus retention (default 12h). Run with `make stress`.",
 ]
 filterwarnings = [
   "error",

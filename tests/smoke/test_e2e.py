@@ -70,17 +70,30 @@ def _stack_ready() -> None:
     _wait_for_samples(60, timeout=MAX_WAIT_S)
 
 
-# (task, train_window, predict_input)
-TASKS: list[tuple[str, str, list[float]]] = [
-    ("cpu_forecast_arima", "2m", [0.5]),
-    ("cpu_forecast_xgb", "2m", [0.3, 0.4, 0.5, 0.4, 0.3, 0.5]),
-    ("cpu_forecast_lstm", "2m", [0.3, 0.4, 0.5, 0.4, 0.3, 0.5]),
-    ("cpu_forecast_arima_drift", "2m", [0.3] * 12),
+# (task, train_window, predict_input_series). ``predict_input_series`` is
+# the body that goes under ``input_series`` — a dict so multivariate
+# tasks can declare multiple feature windows.
+_CPU_WINDOW = [0.3, 0.4, 0.5, 0.4, 0.3, 0.5]
+_MEM_WINDOW = [0.6, 0.6, 0.6, 0.7, 0.7, 0.7]
+TASKS: list[tuple[str, str, dict[str, list[float]]]] = [
+    # Univariate baseline
+    ("cpu_forecast_arima", "2m", {"cpu": [0.5]}),
+    ("cpu_forecast_xgb", "2m", {"cpu": _CPU_WINDOW}),
+    ("cpu_forecast_lstm", "2m", {"cpu": _CPU_WINDOW}),
+    ("cpu_forecast_arima_drift", "2m", {"cpu": [0.3] * 12}),
+    # Multivariate (Phase 3)
+    ("cpu_mem_forecast_xgb", "2m", {"cpu": _CPU_WINDOW, "mem": _MEM_WINDOW}),
+    ("cpu_mem_forecast_lstm", "2m", {"cpu": _CPU_WINDOW, "mem": _MEM_WINDOW}),
+    ("cpu_mem_drift", "2m", {"cpu": [0.3] * 12, "mem": [0.6] * 12}),
 ]
 
 
-@pytest.mark.parametrize("task,window,predict_input", TASKS, ids=[t[0] for t in TASKS])
-def test_train_then_predict(task: str, window: str, predict_input: list[float]) -> None:
+@pytest.mark.parametrize(
+    "task,window,predict_input_series", TASKS, ids=[t[0] for t in TASKS]
+)
+def test_train_then_predict(
+    task: str, window: str, predict_input_series: dict[str, list[float]]
+) -> None:
     train = httpx.post(
         f"{INTELLIGENCE_URL}/tasks/{task}/train",
         json={"data_source": {"kind": "prometheus", "window": window, "step": "2s"}},
@@ -91,7 +104,7 @@ def test_train_then_predict(task: str, window: str, predict_input: list[float]) 
 
     predict = httpx.post(
         f"{INTELLIGENCE_URL}/tasks/{task}/predict",
-        json={"input_series": {"cpu": predict_input}},
+        json={"input_series": predict_input_series},
         timeout=30.0,
     )
     assert predict.status_code == 200, f"predict {task}: {predict.status_code} {predict.text}"
@@ -126,4 +139,31 @@ def test_readyz_after_bootstrap() -> None:
     assert r.status_code == 200, r.text
     body = r.json()
     assert body["status"] == "ready"
-    assert body["tasks"] >= 4
+    # 4 univariate + 3 multivariate = 7 registered tasks in the demo config.
+    assert body["tasks"] >= 7
+
+
+def test_arima_rejects_multivariate_predict_input() -> None:
+    """ARIMA is single-feature by design. Sending a multi-feature
+    ``input_series`` to an ARIMA task must fail at the contract boundary
+    (422) — the InputSpec's ``n_features`` is 1 and validation rejects
+    the extra key.
+    """
+    r = httpx.post(
+        f"{INTELLIGENCE_URL}/tasks/cpu_forecast_arima/predict",
+        json={"input_series": {"cpu": [0.5], "mem": [0.6]}},
+        timeout=10.0,
+    )
+    assert r.status_code == 422, r.text
+
+
+def test_multivariate_xgb_predict_rejects_missing_covariate() -> None:
+    """A multivariate task must receive every feature it was trained
+    on. Sending only the target should fail validation (422) rather
+    than silently dropping the covariate."""
+    r = httpx.post(
+        f"{INTELLIGENCE_URL}/tasks/cpu_mem_forecast_xgb/predict",
+        json={"input_series": {"cpu": _CPU_WINDOW}},
+        timeout=10.0,
+    )
+    assert r.status_code == 422, r.text
