@@ -22,16 +22,11 @@ Cheap, doc-side changes.
   as [`docs/getting-started.md`](docs/getting-started.md).* Linear path
   from `helm install` to first `/predict`, anchored on the `cpu_forecast`
   example.
-- **More energy examples beyond Kepler.** IPMI exporter, RAPL via
-  node-exporter, PDU SNMP exporter, smart-plug exporters, DCIM-style
-  metrics (Redfish). Each is one PromQL row in the
-  [`examples/energy_forecast/`](examples/energy_forecast/) recipe table —
-  no new bundled data, no library changes.
-- **Default Grafana dashboard JSON.** Shipped opt-in via the Helm chart
-  as a ConfigMap with the kube-prometheus-stack sidecar label
-  (`grafana_dashboard: "1"`). Panels source from the existing `/metrics`
-  endpoint: predict latency quantiles, train durations, per-task error
-  rate, registered-tasks gauge.
+- **More energy examples beyond Kepler.** *Shipped 2026-05-13.* IPMI
+  exporter, RAPL via node-exporter, PDU SNMP exporter, smart-plug
+  exporters, DCIM-style metrics (Redfish). Each is one PromQL row in
+  the [`examples/energy_forecast/`](examples/energy_forecast/) recipe
+  table — no new bundled data, no library changes.
 
 ## Phase 2 — Adjacent ingestion
 
@@ -116,6 +111,11 @@ Only when a pilot actually asks for one of these:
   extracting a source registry mirroring the kind dispatch.
 - **`kind: prophet`** as a low-priority addition; the Chronos
   zero-shot pitch covers most of the same ground.
+- **Default Grafana dashboard JSON.** Operator-facing polish. ConfigMap
+  shipped via the Helm chart with the kube-prometheus-stack sidecar
+  label; panels source from the existing `/metrics` endpoint
+  (predict / train latency, per-task error rate, registered-tasks
+  gauge). Lands when a pilot operator actually wants one.
 
 ## Explicitly out of scope
 

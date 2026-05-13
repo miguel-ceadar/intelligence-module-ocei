@@ -75,6 +75,21 @@ def test_loader_is_ready_delegates_to_source(tmp_path):
     assert "nope" in msg or "missing" in msg
 
 
+def test_static_loader_raises_clear_error_on_too_few_rows(tmp_path):
+    """A CSV smaller than ``min_points`` must be refused with a clear
+    message rather than letting the scaler / supervised reshape produce
+    an opaque error inside the trainer."""
+    from intelligence.tasks.loaders import StaticCsvLoader
+    from intelligence.telemetry import StaticSource
+
+    tiny = tmp_path / "tiny.csv"
+    tiny.write_text("time,value\n2024-01-01,0.1\n2024-01-02,0.2\n2024-01-03,0.3\n")
+
+    loader = StaticCsvLoader(source=StaticSource(base_dir=tmp_path))
+    with pytest.raises(ValueError, match=r"'tiny.csv'.*3 usable.*need at least 30"):
+        loader(StaticDataSource(kind="static", name="tiny.csv"))
+
+
 def test_factory_signature_is_backwards_compatible(samples_dir):
     """``static_csv_loader(value_col=..., base_dir=...)`` must keep
     producing a working loader — existing factories in catalog.py rely on
@@ -110,13 +125,12 @@ class _FakeSource:
         return True, "ok"
 
 
-def _fake_promql_df() -> pd.DataFrame:
-    return pd.DataFrame(
-        {
-            "timestamp": pd.to_datetime([1700000000, 1700000060, 1700000120], unit="s", utc=True),
-            "value": [0.1, 0.2, 0.3],
-        }
-    )
+def _fake_promql_df(n: int = 40) -> pd.DataFrame:
+    """Build a fake matrix response. Default size sits above the
+    loader's ``min_points`` floor so unit tests exercise the happy path
+    without each having to thread an override."""
+    ts = pd.to_datetime([1700000000 + 60 * i for i in range(n)], unit="s", utc=True)
+    return pd.DataFrame({"timestamp": ts, "value": [0.1 + 0.01 * i for i in range(n)]})
 
 
 def test_prometheus_loader_passes_query_to_source():
@@ -170,12 +184,13 @@ def test_prometheus_loader_accepts_custom_prepare():
         seen["rows"] = len(df)
         return {"marker": "custom"}
 
-    source = _FakeSource(_fake_promql_df())
+    fake_df = _fake_promql_df()
+    source = _FakeSource(fake_df)
     loader = PrometheusLoader(source=source, query="up", prepare=custom_prepare)
     out = loader(PrometheusDataSource(kind="prometheus", window="1h", step="1m"))
 
     assert out == {"marker": "custom"}
-    assert seen["rows"] == 3
+    assert seen["rows"] == len(fake_df)
 
 
 def test_prometheus_loader_rejects_wrong_descriptor():
@@ -185,6 +200,65 @@ def test_prometheus_loader_rejects_wrong_descriptor():
     loader = PrometheusLoader(source=source, query="up")
     with pytest.raises(ValueError, match="PrometheusDataSource"):
         loader(StaticDataSource(kind="static", name="x.csv"))
+
+
+def test_prometheus_loader_strips_nan_and_inf_before_prepare():
+    """NaN values (stale markers, histogram_quantile on empty buckets) and
+    ±Inf (division-by-zero PromQL) crash sklearn scalers with opaque
+    errors. The loader must drop them before the prepare runs.
+    """
+    import numpy as np
+
+    from intelligence.api.schemas import PrometheusDataSource
+    from intelligence.tasks.loaders import PrometheusLoader
+
+    base = _fake_promql_df(n=40)
+    # Punch holes: a NaN, a +Inf, a -Inf scattered through the response.
+    base.loc[5, "value"] = np.nan
+    base.loc[12, "value"] = np.inf
+    base.loc[20, "value"] = -np.inf
+
+    seen: dict = {}
+
+    def custom_prepare(df):
+        seen["rows"] = len(df)
+        seen["has_nan"] = bool(df["value"].isna().any())
+        seen["has_inf"] = bool(np.isinf(df["value"]).any())
+        return {"marker": "ok"}
+
+    loader = PrometheusLoader(source=_FakeSource(base), query="up", prepare=custom_prepare)
+    loader(PrometheusDataSource(kind="prometheus", window="1h", step="1m"))
+
+    assert seen["rows"] == 37  # 40 minus the three holes
+    assert seen["has_nan"] is False
+    assert seen["has_inf"] is False
+
+
+def test_prometheus_loader_raises_clear_error_on_too_few_points():
+    """A response with fewer usable points than ``min_points`` should be
+    refused at the loader with a message that tells the operator what
+    happened, rather than letting sklearn's MinMaxScaler raise on a
+    too-small array. Default min_points is 30."""
+    from intelligence.api.schemas import PrometheusDataSource
+    from intelligence.tasks.loaders import PrometheusLoader
+
+    source = _FakeSource(_fake_promql_df(n=5))
+    loader = PrometheusLoader(source=source, query="rate(metric[1m])")
+
+    with pytest.raises(ValueError, match=r"5 usable point.* need at least 30"):
+        loader(PrometheusDataSource(kind="prometheus", window="1h", step="1m"))
+
+
+def test_prometheus_loader_min_points_is_configurable():
+    """A custom ``min_points`` overrides the default — useful when a
+    builder knows its kind tolerates very short series."""
+    from intelligence.api.schemas import PrometheusDataSource
+    from intelligence.tasks.loaders import PrometheusLoader
+
+    source = _FakeSource(_fake_promql_df(n=5))
+    loader = PrometheusLoader(source=source, query="up", min_points=2)
+    out = loader(PrometheusDataSource(kind="prometheus", window="1h", step="1m"))
+    assert "scaler_obj" in out
 
 
 def test_prometheus_loader_raises_clear_error_on_empty_response():

@@ -150,6 +150,18 @@ Errors you might hit and what they mean:
 | `502` | `upstream telemetry error: ...` | Prometheus unreachable, refused the connection, or returned a 5xx. Test the endpoint from inside the cluster. |
 | `501` | drift not trainable | You hit `/train` on a `kind: drift` task — drift consumes its forecaster's output, no separate fit. |
 
+Two operational notes:
+
+- **Concurrent `/train` calls succeed independently.** Both produce a
+  new model version with its own tag; the most recent timestamp wins
+  `:latest`. Duplicate POSTs from a misbehaving client pay the full
+  cost twice.
+- **Training shares the pod with `/predict`.** Long trains add
+  `/predict` tail latency and can push memory past the chart's default
+  4 Gi limit. For slow-training tasks, raise `resources.limits.memory`
+  in your values file and uncomment the `startupProbe` block to give
+  the first auto-train enough budget.
+
 ## Step 4 — Predict
 
 Forecast the next CPU value, given the latest observation:

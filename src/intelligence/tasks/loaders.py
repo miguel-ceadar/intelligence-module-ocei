@@ -19,6 +19,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 from urllib.parse import urlparse
 
+import numpy as np
 import pandas as pd
 from sklearn.preprocessing import MinMaxScaler
 
@@ -85,6 +86,9 @@ class StaticCsvLoader:
             a custom ``prepare`` is supplied.
         base_dir: convenience for constructing a default ``StaticSource``.
             Ignored when ``source`` is supplied.
+        min_points: minimum row count after NaN drop. Below this the
+            loader raises with a clear message rather than letting a
+            tiny dataset crash the scaler or the supervised reshape.
     """
 
     def __init__(
@@ -93,10 +97,12 @@ class StaticCsvLoader:
         prepare: Callable[[pd.DataFrame], dict] | None = None,
         value_col: str | None = None,
         base_dir: Path | None = None,
+        min_points: int = 30,
     ) -> None:
         self.source = source if source is not None else StaticSource(base_dir=base_dir)
         self.value_col = value_col
         self.prepare = prepare if prepare is not None else _make_univariate_prepare(value_col)
+        self.min_points = int(min_points)
 
     def __call__(self, descriptor: StaticDataSource) -> dict:
         if not isinstance(descriptor, StaticDataSource):
@@ -106,6 +112,11 @@ class StaticCsvLoader:
         df = self.source.fetch_range(descriptor.name)
         if self.value_col is not None:
             df = _select_value_column(df, self.value_col)
+        if len(df) < self.min_points:
+            raise ValueError(
+                f"static dataset {descriptor.name!r} has {len(df)} usable "
+                f"row(s) — need at least {self.min_points}."
+            )
         return self.prepare(df)
 
     def is_ready(self) -> tuple[bool, str]:
@@ -119,19 +130,28 @@ def static_csv_loader(
     value_col: str | None = None,
     base_dir: Path | None = None,
     prepare: Callable[[pd.DataFrame], dict] | None = None,
+    min_points: int = 30,
 ) -> StaticCsvLoader:
     """Build a ``StaticCsvLoader``.
 
     Pass ``prepare`` to swap the default univariate split+scale logic
     (e.g. ``make_xgb_prepare(look_back=6)`` or ``make_lstm_prepare(...)``).
     """
-    return StaticCsvLoader(value_col=value_col, base_dir=base_dir, prepare=prepare)
+    return StaticCsvLoader(
+        value_col=value_col, base_dir=base_dir, prepare=prepare, min_points=min_points
+    )
 
 
 def _make_univariate_prepare(
     value_col: str | None,
 ) -> Callable[[pd.DataFrame], dict]:
-    """Default prepare: pick a numeric column, 80/20 split, MinMax-scale."""
+    """Default prepare: pick a numeric column, 80/20 split, MinMax-scale.
+
+    The timestamp column (if any) is ignored — the trainer indexes by
+    row position, not by time. Sparse or irregularly-spaced inputs will
+    silently train as if regularly-spaced; validate upstream if that
+    matters for your metric.
+    """
 
     def prepare(df: pd.DataFrame) -> dict:
         col = value_col or _autodetect_value_column(df)
@@ -158,6 +178,13 @@ class PrometheusLoader:
     the window and step (and optionally an endpoint override when the
     deployment opts in via ``allow_endpoint_override``).
 
+    NaN-valued stale markers and ±Inf points are stripped before the
+    prepare runs (sklearn scalers reject them opaquely). Prometheus
+    *missing* points are sparse — timestamps with no data are simply
+    omitted, not NaN'd — and downstream prepares index by row position,
+    so heavily-sparse windows silently train on irregularly-spaced data;
+    pick a window with consistent metric presence.
+
     Args:
         source: Prometheus-shaped source. Required (no useful default).
         query: PromQL expression evaluated at fetch time.
@@ -171,6 +198,9 @@ class PrometheusLoader:
         source_kwargs: how to rebuild a ``PrometheusSource`` for the
             override path — configured auth + TLS carry through. ``None``
             means override is not supported.
+        min_points: minimum usable rows after NaN/Inf drop. Below this
+            the loader raises with a clear message rather than letting
+            a tiny window crash the scaler or supervised reshape.
     """
 
     def __init__(
@@ -181,6 +211,7 @@ class PrometheusLoader:
         value_col: str | None = None,
         allow_endpoint_override: bool = False,
         source_kwargs: dict | None = None,
+        min_points: int = 30,
     ) -> None:
         self.source = source
         self.query = query
@@ -190,6 +221,7 @@ class PrometheusLoader:
         )
         self.allow_endpoint_override = allow_endpoint_override
         self._source_kwargs = source_kwargs or {}
+        self.min_points = int(min_points)
 
     def __call__(self, descriptor: PrometheusDataSource) -> dict:
         if not isinstance(descriptor, PrometheusDataSource):
@@ -211,6 +243,15 @@ class PrometheusLoader:
                 f"zero series over the {descriptor.window} window. Check "
                 f"the query against the live Prometheus and that the "
                 f"window covers a period where data exists."
+            )
+        value_cols = [c for c in df.columns if c.lower() != "timestamp"]
+        df = df.replace([np.inf, -np.inf], np.nan).dropna(subset=value_cols)
+        if len(df) < self.min_points:
+            raise ValueError(
+                f"PromQL returned {len(df)} usable point(s) after stripping "
+                f"NaN/Inf — need at least {self.min_points}. Widen the "
+                f"window, shrink the step, or check that the metric isn't "
+                f"sparse over the requested range. Query: {self.query!r}"
             )
         # Single-series PromQL responses always come back with a literal
         # "value" column. Rename to the task's feature name so downstream
@@ -258,6 +299,7 @@ def prometheus_loader(
     value_col: str | None = None,
     allow_endpoint_override: bool = False,
     source_kwargs: dict | None = None,
+    min_points: int = 30,
 ) -> PrometheusLoader:
     """Build a ``PrometheusLoader``. Thin wrapper for symmetry with
     ``static_csv_loader``."""
@@ -268,6 +310,7 @@ def prometheus_loader(
         value_col=value_col,
         allow_endpoint_override=allow_endpoint_override,
         source_kwargs=source_kwargs,
+        min_points=min_points,
     )
 
 
@@ -277,6 +320,7 @@ def build_loader_for_task(
     value_col: str | None = None,
     prepare: Callable[[pd.DataFrame], dict] | None = None,
     query: str | None = None,
+    min_points: int = 30,
 ) -> StaticCsvLoader | PrometheusLoader:
     """Pick the right loader for ``task_name`` based on ``cfg.telemetry``.
 
@@ -312,9 +356,10 @@ def build_loader_for_task(
             prepare=prepare,
             allow_endpoint_override=cfg.telemetry.allow_endpoint_override,
             source_kwargs=source_kwargs,
+            min_points=min_points,
         )
 
-    return static_csv_loader(value_col=value_col, prepare=prepare)
+    return static_csv_loader(value_col=value_col, prepare=prepare, min_points=min_points)
 
 
 # Duration parsing: matches the subset of PromQL durations we actually
