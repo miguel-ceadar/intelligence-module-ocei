@@ -19,6 +19,10 @@ This iteration is the O-CEI continuum take — relaxes the ICOS-specific
 coupling so the same service runs on any vanilla Kubernetes +
 Prometheus stack, beside or instead of the original ICOS deployment.
 
+> **New here?** Follow the [Getting Started](docs/getting-started.md)
+> walkthrough — install the chart, point at a Prometheus, train, and
+> predict in about 10 minutes. The rest of this README is reference.
+
 ## What's included
 
 Four algorithm **kinds** you compose into tasks via YAML:

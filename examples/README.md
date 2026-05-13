@@ -5,6 +5,11 @@ or copy and edit. Each subdirectory is self-contained: a `README.md`
 walks through what the example demonstrates, and a `config.yaml` is a
 complete file you can mount into the service.
 
+> If you're new, start with the
+> [Getting Started walkthrough](../docs/getting-started.md) — it uses
+> `cpu_forecast/` as the anchor and takes you end-to-end from `helm
+> install` to a `/predict` response.
+
 | Example | What it shows |
 |---|---|
 | [`cpu_forecast/`](cpu_forecast/) | CPU utilisation forecasting + drift detection. The canonical example — four task kinds against the same Prometheus query. |

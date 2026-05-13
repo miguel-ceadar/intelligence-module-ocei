@@ -13,7 +13,7 @@ Ordering reflects two principles:
 Energy forecasting is treated as a first-class use case throughout, not a
 separate track.
 
-## Phase 1 — Pilot enablement
+## Phase 1 — QoL improvements
 
 Cheap, doc-side changes.
 
