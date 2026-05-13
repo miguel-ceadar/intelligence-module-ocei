@@ -16,6 +16,8 @@ with them.
 
 from __future__ import annotations
 
+import math
+
 from pydantic import BaseModel
 
 
@@ -83,6 +85,23 @@ class InputSpec(BaseModel):
                     f"feature {name!r}: expected steps_back={self.steps_back} "
                     f"timesteps, got window length {len(values)}"
                 )
+
+        # Numeric finiteness. NaN bypasses <, > comparisons silently, so
+        # the value_range check below would let it through; +/-Inf would
+        # be caught there but the message would be confusing. Reject both
+        # explicitly before the semantic check.
+        for name, values in input_series.items():
+            for i, v in enumerate(values):
+                try:
+                    finite = math.isfinite(float(v))
+                except (TypeError, ValueError) as e:
+                    raise ContractViolation(
+                        f"feature {name!r} value {v!r} at index {i} is not numeric"
+                    ) from e
+                if not finite:
+                    raise ContractViolation(
+                        f"feature {name!r} value {v!r} at index {i} is not finite (NaN/Inf)"
+                    )
 
         # Value ranges (semantic check — catches unit mismatches)
         for name, (lo, hi) in self.value_range.items():

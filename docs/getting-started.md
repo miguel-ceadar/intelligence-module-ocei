@@ -190,8 +190,9 @@ drift tasks; for forecasting tasks it's `null`.
 If the value you pass in `input_series.cpu` falls outside the task's
 `value_range`, predict returns `422` with a message like
 `feature 'cpu' value 1.4 at index 0 outside trained range [0.0, 1.0]`.
-That's the contract check catching a unit / scaling mismatch before
-the model sees it.
+NaN / ±Inf values are rejected the same way. That's the contract check
+catching a unit, scaling, or upstream-data mismatch before the model
+sees it.
 
 For a multi-step forecast, pass `horizon`:
 
@@ -201,7 +202,17 @@ curl -X POST http://localhost:3000/tasks/cpu_forecast_arima/predict \
   -d '{"input_series": {"cpu": [0.42]}, "horizon": 5}'
 ```
 
-`prediction` becomes a 5-element list.
+`prediction` becomes a 5-element list. ARIMA and XGB accept arbitrary
+horizons but cost scales with the value; LSTM refuses horizons above
+the trained `output_size` with `422`.
+
+Errors on `/predict`:
+
+| Status | Detail | Likely cause |
+|---|---|---|
+| `404` | `unknown task: ...` | Task name in the URL isn't registered. |
+| `422` | (validation message) | Request body doesn't match `PredictRequest`, or InputSpec rejected the window — wrong feature names, wrong length, NaN/Inf, value outside `value_range`, or horizon above trained `max_horizon`. |
+| `503` | `no Bento ... in the local store; POST /tasks/.../train first` | No model trained yet (or the pinned version was deleted). |
 
 ## Step 5 — Where to go next
 

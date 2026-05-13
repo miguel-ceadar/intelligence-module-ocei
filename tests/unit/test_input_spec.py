@@ -61,6 +61,46 @@ def test_input_spec_rejects_out_of_range():
         spec.validate({"cpu": [0.0, 0.5, 87.3, 0.5, 0.5, 0.5]})  # percent vs fraction
 
 
+def test_input_spec_rejects_nan_values():
+    """NaN bypasses ``<``/``>`` comparisons silently, so a NaN would
+    pass the value_range check and crash the scaler downstream with an
+    opaque error. Reject explicitly at the contract boundary."""
+    InputSpec = _import_or_skip("InputSpec")
+    ContractViolation = _import_or_skip("ContractViolation")
+    spec = InputSpec(
+        n_features=1,
+        feature_names=["cpu"],
+        steps_back=6,
+        value_range={"cpu": (0.0, 1.0)},
+    )
+    with pytest.raises(ContractViolation, match=r"not finite"):
+        spec.validate({"cpu": [0.1, 0.2, float("nan"), 0.4, 0.5, 0.6]})
+
+
+def test_input_spec_rejects_inf_values():
+    """+/-Inf would technically be caught by the value_range check but
+    with a confusing 'outside range' message. Reject explicitly so the
+    operator sees 'not finite' instead."""
+    InputSpec = _import_or_skip("InputSpec")
+    ContractViolation = _import_or_skip("ContractViolation")
+    spec = InputSpec(n_features=1, feature_names=["cpu"], steps_back=3)
+    with pytest.raises(ContractViolation, match=r"not finite"):
+        spec.validate({"cpu": [0.5, float("inf"), 0.5]})
+    with pytest.raises(ContractViolation, match=r"not finite"):
+        spec.validate({"cpu": [0.5, float("-inf"), 0.5]})
+
+
+def test_input_spec_rejects_non_numeric_values():
+    """A string or None slipping through pydantic's parsing should fail
+    at the contract boundary with a clear message rather than at
+    float(v) deep in the scaler."""
+    InputSpec = _import_or_skip("InputSpec")
+    ContractViolation = _import_or_skip("ContractViolation")
+    spec = InputSpec(n_features=1, feature_names=["cpu"], steps_back=3)
+    with pytest.raises(ContractViolation, match=r"not numeric"):
+        spec.validate({"cpu": [0.5, "oops", 0.5]})  # type: ignore[list-item]
+
+
 def test_input_spec_passes_valid_input():
     InputSpec = _import_or_skip("InputSpec")
     spec = InputSpec(
