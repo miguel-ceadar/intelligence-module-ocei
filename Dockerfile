@@ -43,6 +43,14 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         curl \
     && rm -rf /var/lib/apt/lists/*
 
+# Upgrade the base image's system pip + setuptools + wheel to clear
+# CVEs in the versions python:3.11-slim ships (jaraco.context inside
+# setuptools/_vendor, the top-level wheel install). The runtime never
+# uses these — the venv is uv-built and self-contained — but trivy
+# flags the vendored copies regardless. Must run before PATH points
+# at /app/.venv/bin so the *system* pip is what executes.
+RUN pip install --no-cache-dir --upgrade pip setuptools wheel
+
 COPY --from=builder /app/.venv /app/.venv
 
 ENV PATH="/app/.venv/bin:${PATH}" \
