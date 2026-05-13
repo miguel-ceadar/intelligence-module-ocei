@@ -1,6 +1,6 @@
 .PHONY: install install-dev install-legacy lint format test test-fast test-integration clean \
         up-demo down-demo logs-demo smoke e2e stress e2e-stress \
-        up-dev down-dev e2e-dev chart-lint chart-template
+        up-dev down-dev logs-dev e2e-dev e2e-stress-dev chart-lint chart-template
 
 # The compose stack is a DEMO only (image + bundled prometheus + node-exporter
 # for "see it work in 3 minutes"). Pilots deploy via the Helm chart (k8s) or
@@ -78,7 +78,13 @@ e2e-stress: up-demo
 
 # --- Dev overlay (build image from local sources) -----------------------------
 # Contributor path: rebuild the image and run the demo stack against the
-# local build instead of the GHCR image.
+# local build instead of the GHCR image. Use this whenever the local
+# schema diverges from the published image (between releases).
+#
+# `smoke` and `stress` are stack-agnostic — they just hit localhost:3000
+# — so they work against either the demo stack (up-demo) or the dev
+# stack (up-dev). Only the orchestration targets care which compose
+# files are in play; that's what the `-dev` variants here are for.
 
 up-dev:
 	$(COMPOSE_DEV) up -d --build --wait
@@ -86,8 +92,18 @@ up-dev:
 down-dev:
 	$(COMPOSE_DEV) down -v
 
+logs-dev:
+	$(COMPOSE_DEV) logs -f intelligence
+
 e2e-dev: up-dev
 	uv run pytest -m smoke -v || ($(COMPOSE_DEV) logs intelligence; exit 1)
+
+# Dev counterpart to `e2e-stress`: rebuild local image, then run smoke
+# then stress. For overnight on the local build, swap to `make up-dev`
+# and leave it warming before invoking `make stress`.
+e2e-stress-dev: up-dev
+	uv run pytest -m smoke -v || ($(COMPOSE_DEV) logs intelligence; exit 1)
+	uv run pytest -m stress -v -s || ($(COMPOSE_DEV) logs intelligence; exit 1)
 
 # --- Helm chart ---------------------------------------------------------------
 

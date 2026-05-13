@@ -88,9 +88,7 @@ TASKS: list[tuple[str, str, dict[str, list[float]]]] = [
 ]
 
 
-@pytest.mark.parametrize(
-    "task,window,predict_input_series", TASKS, ids=[t[0] for t in TASKS]
-)
+@pytest.mark.parametrize("task,window,predict_input_series", TASKS, ids=[t[0] for t in TASKS])
 def test_train_then_predict(
     task: str, window: str, predict_input_series: dict[str, list[float]]
 ) -> None:

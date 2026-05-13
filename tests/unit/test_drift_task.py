@@ -171,9 +171,7 @@ def test_drift_task_is_registered_via_builder(tmp_path, monkeypatch):
     monkeypatch.setenv("BENTOML_HOME", str(tmp_path / "bentoml"))
     cfg = IntelligenceConfig(
         tasks={
-            "cpu_forecast_arima": ArimaTaskConfig(
-                kind="arima", features=[FeatureSpec(name="cpu")]
-            ),
+            "cpu_forecast_arima": ArimaTaskConfig(kind="arima", features=[FeatureSpec(name="cpu")]),
             "cpu_forecast_arima_drift": DriftTaskConfig(
                 kind="drift",
                 features=[FeatureSpec(name="cpu")],

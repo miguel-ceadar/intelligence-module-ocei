@@ -77,9 +77,7 @@ def test_task_registry_built_from_task_blocks():
 
     cfg = IntelligenceConfig(
         tasks={
-            "cpu_forecast_arima": ArimaTaskConfig(
-                kind="arima", features=[FeatureSpec(name="cpu")]
-            ),
+            "cpu_forecast_arima": ArimaTaskConfig(kind="arima", features=[FeatureSpec(name="cpu")]),
         },
     )
     reg = build(cfg)

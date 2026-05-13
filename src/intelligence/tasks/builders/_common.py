@@ -30,9 +30,5 @@ def build_input_spec(
         feature_names=[f.name for f in features],
         steps_back=steps_back,
         max_horizon=max_horizon,
-        value_range={
-            f.name: tuple(f.value_range)
-            for f in features
-            if f.value_range is not None
-        },
+        value_range={f.name: tuple(f.value_range) for f in features if f.value_range is not None},
     )
