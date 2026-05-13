@@ -42,7 +42,9 @@ def test_push_uploads_local_bento_folder(mock_hf_api_cls, tmp_path, monkeypatch)
 
     # Save a real Bento in the local store so we can exercise the path lookup.
     bento = bentoml.picklable_model.save_model(
-        "push_me_test", {"weights": [1, 2, 3]}, custom_objects={"meta": "ok"},
+        "push_me_test",
+        {"weights": [1, 2, 3]},
+        custom_objects={"meta": "ok"},
     )
 
     instance = mock_hf_api_cls.return_value
@@ -59,7 +61,9 @@ def test_push_uploads_local_bento_folder(mock_hf_api_cls, tmp_path, monkeypatch)
 
 @mock.patch("intelligence.api.model_repo.snapshot_download")
 def test_pull_downloads_and_resaves_as_picklable_model(
-    mock_snapshot, tmp_path, monkeypatch,
+    mock_snapshot,
+    tmp_path,
+    monkeypatch,
 ):
     """``pull`` stages a snapshot from HF, loads the pickled model and
     custom_objects, then re-saves into the local Bento store via

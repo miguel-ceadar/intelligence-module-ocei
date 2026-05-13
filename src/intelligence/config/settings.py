@@ -70,11 +70,9 @@ class PrometheusConfig(BaseModel):
     timeout: float = 30.0
 
     @model_validator(mode="after")
-    def _one_auth_method(self) -> "PrometheusConfig":
+    def _one_auth_method(self) -> PrometheusConfig:
         if self.token_env and self.token_file:
-            raise ValueError(
-                "prometheus auth: set token_env or token_file, not both"
-            )
+            raise ValueError("prometheus auth: set token_env or token_file, not both")
         return self
 
 
@@ -98,7 +96,7 @@ class TelemetryConfig(BaseModel):
     allow_endpoint_override: bool = False
 
     @model_validator(mode="after")
-    def _prometheus_block_required_when_selected(self) -> "TelemetryConfig":
+    def _prometheus_block_required_when_selected(self) -> TelemetryConfig:
         if self.source == "prometheus" and self.prometheus is None:
             raise ValueError(
                 "telemetry.source='prometheus' requires the telemetry.prometheus block"
@@ -120,9 +118,9 @@ class BootstrapConfig(BaseModel):
     """
 
     auto_train_on_startup: bool = False
-    dataset_name: str | None = None    # static mode
-    window: str | None = None          # prometheus mode
-    step: str | None = None            # prometheus mode
+    dataset_name: str | None = None  # static mode
+    window: str | None = None  # prometheus mode
+    step: str | None = None  # prometheus mode
 
 
 # --- Per-kind task instance configs ----------------------------------------
@@ -299,13 +297,12 @@ class AppConfig(BaseModel):
 
         task_names = set(self.intelligence.tasks)
         for name, task_cfg in self.intelligence.tasks.items():
-            if isinstance(task_cfg, DriftTaskConfig):
-                if task_cfg.forecaster not in task_names:
-                    raise ValueError(
-                        f"drift task {name!r} references forecaster "
-                        f"{task_cfg.forecaster!r} which isn't defined under "
-                        f"`tasks:`. Define the forecaster task or fix the reference."
-                    )
+            if isinstance(task_cfg, DriftTaskConfig) and task_cfg.forecaster not in task_names:
+                raise ValueError(
+                    f"drift task {name!r} references forecaster "
+                    f"{task_cfg.forecaster!r} which isn't defined under "
+                    f"`tasks:`. Define the forecaster task or fix the reference."
+                )
 
 
 def load_config(path: Path | str | None = None, *, validate: bool = True) -> AppConfig:

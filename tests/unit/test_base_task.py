@@ -36,11 +36,13 @@ def _make_model(predict_return: float = 0.42):
 
 
 def _make_loader():
-    return mock.MagicMock(return_value={
-        "X_train": [[1.0]],
-        "X_test": [[2.0]],
-        "scaler_obj": mock.MagicMock(),
-    })
+    return mock.MagicMock(
+        return_value={
+            "X_train": [[1.0]],
+            "X_test": [[2.0]],
+            "scaler_obj": mock.MagicMock(),
+        }
+    )
 
 
 @pytest.fixture
@@ -83,10 +85,12 @@ def test_train_invalidates_cache(task):
         assert get.call_count == 1
         assert task.is_loaded()
 
-        task.train(TrainRequest(
-            data_source=StaticDataSource(kind="static", name="x.csv"),
-            model_parameters={},
-        ))
+        task.train(
+            TrainRequest(
+                data_source=StaticDataSource(kind="static", name="x.csv"),
+                model_parameters={},
+            )
+        )
         assert not task.is_loaded(), "train should invalidate the cached model"
 
         task.predict(PredictRequest(input_series={"x": [1.0]}))
@@ -101,17 +105,21 @@ def test_train_no_longer_raises_for_prometheus_descriptor():
     from intelligence.api.schemas import PrometheusDataSource
 
     # A loader that accepts any descriptor and returns trivial components.
-    fake_loader = mock.MagicMock(return_value={
-        "X_train": [[1.0]],
-        "X_test": [[2.0]],
-        "scaler_obj": mock.MagicMock(),
-    })
+    fake_loader = mock.MagicMock(
+        return_value={
+            "X_train": [[1.0]],
+            "X_test": [[2.0]],
+            "scaler_obj": mock.MagicMock(),
+        }
+    )
 
     t = BaseTask(name="t", model=_make_model(), data_loader=fake_loader)
-    result = t.train(TrainRequest(
-        data_source=PrometheusDataSource(kind="prometheus", window="1h", step="1m"),
-        model_parameters={},
-    ))
+    result = t.train(
+        TrainRequest(
+            data_source=PrometheusDataSource(kind="prometheus", window="1h", step="1m"),
+            model_parameters={},
+        )
+    )
     assert result.model_tag == "fake:v1"
     fake_loader.assert_called_once()
 
@@ -146,7 +154,10 @@ def test_predict_rejects_horizon_above_input_spec_max():
         pytest.skip("PredictRequest.horizon not implemented yet")
 
     spec = InputSpec(
-        n_features=1, feature_names=["x"], steps_back=1, max_horizon=2,
+        n_features=1,
+        feature_names=["x"],
+        steps_back=1,
+        max_horizon=2,
     )
     t = BaseTask(name="t", model=_make_model(), data_loader=_make_loader(), input_spec=spec)
     with pytest.raises(ContractViolation, match="horizon"):
@@ -164,7 +175,10 @@ def test_predict_allows_horizon_within_max(task):
         pytest.skip("PredictRequest.horizon not implemented yet")
 
     spec = InputSpec(
-        n_features=1, feature_names=["x"], steps_back=1, max_horizon=3,
+        n_features=1,
+        feature_names=["x"],
+        steps_back=1,
+        max_horizon=3,
     )
     # ``allow_unverified_models=True`` skips the Bento.custom_objects spec
     # check — the fake bento here doesn't carry one.
@@ -185,10 +199,13 @@ def test_predict_raises_filenotfound_when_no_model_in_store(task):
     """Without a saved Bento, predict must raise FileNotFoundError —
     the API layer translates that to 503 (see service.predict)."""
     import bentoml
-    with mock.patch(
-        "bentoml.picklable_model.get",
-        side_effect=bentoml.exceptions.NotFound("no such model"),
+
+    with (
+        mock.patch(
+            "bentoml.picklable_model.get",
+            side_effect=bentoml.exceptions.NotFound("no such model"),
+        ),
+        pytest.raises(FileNotFoundError, match="no Bento"),
     ):
-        with pytest.raises(FileNotFoundError, match="no Bento"):
-            task.predict(PredictRequest(input_series={"x": [1.0]}))
+        task.predict(PredictRequest(input_series={"x": [1.0]}))
     assert not task.is_loaded()

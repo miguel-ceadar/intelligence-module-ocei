@@ -148,8 +148,17 @@ class ModelTrainer:
         return model, step_epoch, step_loss
 
     def _kd_regression(
-        self, teacher, student, train_loader, epochs, T,
-        soft_target_loss_weight, ce_loss_weight, optimizer, method, device,
+        self,
+        teacher,
+        student,
+        train_loader,
+        epochs,
+        T,
+        soft_target_loss_weight,
+        ce_loss_weight,
+        optimizer,
+        method,
+        device,
     ):
         torch.manual_seed(42)
         np.random.seed(42)
@@ -188,8 +197,15 @@ class ModelTrainer:
         return student, step_epoch, step_loss
 
     def _distilled_process(
-        self, teacher_trained, train_loader, val_loader,
-        input_size, output_size, num_epochs, criterion, device,
+        self,
+        teacher_trained,
+        train_loader,
+        val_loader,
+        input_size,
+        output_size,
+        num_epochs,
+        criterion,
+        device,
     ):
         hidden_size = 4
         student = LighterStudentLSTMModel(input_size, hidden_size, output_size).to(device)
@@ -243,8 +259,14 @@ class ModelTrainer:
 
         if distill:
             model, *_ = self._distilled_process(
-                model, train_loader, val_loader, input_size, output_size,
-                num_epochs, criterion, device_t,
+                model,
+                train_loader,
+                val_loader,
+                input_size,
+                output_size,
+                num_epochs,
+                criterion,
+                device_t,
             )
 
         outputs = model(self.data_components["X_test"].to(device_t))
@@ -254,13 +276,17 @@ class ModelTrainer:
         # shape-compatible, then restore.
         num_variables = int(self.data_components.get("num_variables", 1))
         samples = y_pred.shape[0]
-        y_pred_inv = self.data_components["scaler_obj"].inverse_transform(
-            y_pred.reshape(-1, num_variables)
-        ).reshape(samples, -1)
+        y_pred_inv = (
+            self.data_components["scaler_obj"]
+            .inverse_transform(y_pred.reshape(-1, num_variables))
+            .reshape(samples, -1)
+        )
         y_test_arr = self.data_components["y_test"]
-        y_test_inv = self.data_components["scaler_obj"].inverse_transform(
-            y_test_arr.reshape(-1, num_variables)
-        ).reshape(samples, -1)
+        y_test_inv = (
+            self.data_components["scaler_obj"]
+            .inverse_transform(y_test_arr.reshape(-1, num_variables))
+            .reshape(samples, -1)
+        )
 
         out_metrics: dict = {}
         for i in range(y_test_inv.shape[1]):

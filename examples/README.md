@@ -14,27 +14,28 @@ complete file you can mount into the service.
 
 ## How to run one
 
-Pick the example you want, mount its config into the container:
+Pick the example, mount its `config.yaml` into the published image,
+and point at your Prometheus:
 
 ```bash
-INTELLIGENCE_CONFIG_FILE=./examples/mem_forecast/config.yaml \
-  docker compose up -d --build --wait
+docker run -d --name icos-intelligence-ocei \
+  -p 3000:3000 \
+  -e INTELLIGENCE_CONFIG=/etc/intelligence/config.yaml \
+  -e INTELLIGENCE_TELEMETRY__PROMETHEUS__ENDPOINT=https://my-prom.example \
+  -v "$PWD/examples/mem_forecast/config.yaml:/etc/intelligence/config.yaml:ro" \
+  -v intelligence-bentoml:/var/lib/bentoml \
+  ghcr.io/miguel-ceadar/icos-intelligence-ocei:0.1.0
 ```
 
-Or for local dev without Docker:
+On Kubernetes via Helm, the same config goes under `config.intelligence`
+in your values file — see the [chart README](../helm/intelligence/README.md).
+
+For local dev without Docker (the contributor path), point the config
+env var at the file and run uvicorn:
 
 ```bash
 INTELLIGENCE_CONFIG=./examples/mem_forecast/config.yaml \
   uv run uvicorn intelligence.api.service:app --port 3000
-```
-
-The example configs use placeholder Prometheus endpoints. Override at
-deploy time:
-
-```bash
-INTELLIGENCE_TELEMETRY__PROMETHEUS__ENDPOINT=https://my-prom.example \
-INTELLIGENCE_CONFIG_FILE=./examples/cpu_forecast/config.yaml \
-  docker compose up -d --build --wait
 ```
 
 ## How to combine examples

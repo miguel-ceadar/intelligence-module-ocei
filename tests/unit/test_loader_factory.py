@@ -32,11 +32,12 @@ def test_prometheus_config_yields_prometheus_loader():
         prometheus=PrometheusConfig(endpoint="http://prom:9090"),
     )
     loader = build_loader_for_task(
-        cfg, "cpu_forecast_arima",
-        query='rate(node_cpu_seconds_total[5m])',
+        cfg,
+        "cpu_forecast_arima",
+        query="rate(node_cpu_seconds_total[5m])",
     )
     assert isinstance(loader, PrometheusLoader)
-    assert loader.query == 'rate(node_cpu_seconds_total[5m])'
+    assert loader.query == "rate(node_cpu_seconds_total[5m])"
 
 
 def test_prometheus_missing_query_raises():
@@ -83,7 +84,8 @@ def test_value_col_kwarg_is_accepted_for_both_loader_kinds():
         prometheus=PrometheusConfig(endpoint="http://prom:9090"),
     )
     prom_loader = build_loader_for_task(
-        prom_cfg, "cpu_forecast_arima",
+        prom_cfg,
+        "cpu_forecast_arima",
         value_col="cpu",
         query="up",
     )

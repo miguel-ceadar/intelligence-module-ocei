@@ -90,6 +90,7 @@ class DriftDetectionTask(BaseTask):
             custom_objects["input_spec"] = self.input_spec
 
         import bentoml
+
         bento = bentoml.picklable_model.save_model(
             self.bento_name,
             calc,
@@ -99,7 +100,7 @@ class DriftDetectionTask(BaseTask):
         self._invalidate()
         return TrainResponse(
             model_tag=str(bento.tag),
-            metrics={"reference_size": int(len(reference_df))},
+            metrics={"reference_size": len(reference_df)},
         )
 
     def predict(self, req: PredictRequest) -> PredictResponse:
@@ -141,7 +142,7 @@ class DriftDetectionTask(BaseTask):
         return PredictResponse(
             prediction={
                 "drift_detected": any_alert,
-                "n_chunks": int(len(chunks)),
+                "n_chunks": len(chunks),
                 "metric": metric,
                 "forecaster": self.forecaster_task_name,
             },

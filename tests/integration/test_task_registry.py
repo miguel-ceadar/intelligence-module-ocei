@@ -30,8 +30,8 @@ def test_task_registry_register_and_lookup():
     class FakeTask:
         name = "cpu_forecast_arima"
 
-        def train(self, req): ...  # noqa: E704
-        def predict(self, req): ...  # noqa: E704
+        def train(self, req): ...
+        def predict(self, req): ...
 
     reg = TaskRegistry()
     reg.register(FakeTask())
@@ -54,8 +54,8 @@ def test_task_registry_register_idempotent_or_explicit():
     class FakeTask:
         name = "cpu_forecast_arima"
 
-        def train(self, req): ...  # noqa: E704
-        def predict(self, req): ...  # noqa: E704
+        def train(self, req): ...
+        def predict(self, req): ...
 
     reg = TaskRegistry()
     reg.register(FakeTask())

@@ -133,10 +133,27 @@ class RequestIdFilter(logging.Filter):
 # Standard logging-record attributes we don't want to spam into every log
 # line. Everything else on the record becomes a top-level JSON field.
 _STD_LOG_RECORD_FIELDS = {
-    "name", "msg", "args", "levelname", "levelno", "pathname", "filename",
-    "module", "exc_info", "exc_text", "stack_info", "lineno", "funcName",
-    "created", "msecs", "relativeCreated", "thread", "threadName",
-    "processName", "process", "taskName",
+    "name",
+    "msg",
+    "args",
+    "levelname",
+    "levelno",
+    "pathname",
+    "filename",
+    "module",
+    "exc_info",
+    "exc_text",
+    "stack_info",
+    "lineno",
+    "funcName",
+    "created",
+    "msecs",
+    "relativeCreated",
+    "thread",
+    "threadName",
+    "processName",
+    "process",
+    "taskName",
 }
 
 
@@ -229,8 +246,11 @@ class ObservabilityMiddleware:
             logger.exception(
                 "request raised",
                 extra={
-                    "path": path, "method": method, "route": route,
-                    "status": 500, "duration_ms": round(duration * 1000, 2),
+                    "path": path,
+                    "method": method,
+                    "route": route,
+                    "status": 500,
+                    "duration_ms": round(duration * 1000, 2),
                 },
             )
             raise
@@ -242,8 +262,11 @@ class ObservabilityMiddleware:
             logger.info(
                 "request",
                 extra={
-                    "path": path, "method": method, "route": route,
-                    "status": status, "duration_ms": round(duration * 1000, 2),
+                    "path": path,
+                    "method": method,
+                    "route": route,
+                    "status": status,
+                    "duration_ms": round(duration * 1000, 2),
                 },
             )
         finally:

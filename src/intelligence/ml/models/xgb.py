@@ -60,8 +60,8 @@ class XgbModel:
         metrics, model = trainer.train_xgb()
 
         custom_objects = {
-            "scaler_obj": components_with_params["scaler_obj"],   # y-scaler
-            "scaler_X": components_with_params["scaler_X"],       # X-scaler — needed by predict
+            "scaler_obj": components_with_params["scaler_obj"],  # y-scaler
+            "scaler_X": components_with_params["scaler_X"],  # X-scaler — needed by predict
             "look_back": components_with_params["look_back"],
             "model_metrics": metrics,
             "test_sample_size": len(components_with_params["X_test"]),
@@ -69,6 +69,7 @@ class XgbModel:
         }
 
         import bentoml
+
         bento = bentoml.picklable_model.save_model(
             bento_name,
             model,
@@ -94,9 +95,7 @@ class XgbModel:
         _key, values = next(iter(input_series.items()))
         look_back = int(bento_model.custom_objects["look_back"])
         if len(values) < look_back:
-            raise ValueError(
-                f"need at least {look_back} observations, got {len(values)}"
-            )
+            raise ValueError(f"need at least {look_back} observations, got {len(values)}")
 
         scaler_x = bento_model.custom_objects["scaler_X"]
         scaler_y = bento_model.custom_objects["scaler_obj"]
@@ -112,9 +111,7 @@ class XgbModel:
             else:
                 x_scaled = scaler_x.transform(x)
             y_scaled = regressor.predict(x_scaled)
-            y_raw = float(scaler_y.inverse_transform(
-                np.asarray(y_scaled).reshape(-1, 1)
-            )[0, 0])
+            y_raw = float(scaler_y.inverse_transform(np.asarray(y_scaled).reshape(-1, 1))[0, 0])
             forecasts.append(y_raw)
             # Slide the window forward: drop oldest, append fresh prediction.
             window = [*window[1:], y_raw]
@@ -135,10 +132,9 @@ def make_xgb_prepare(
     """
 
     def prepare(df: pd.DataFrame) -> dict:
-        cols = [
-            c for c in df.columns
-            if c.lower() not in {"time", "timestamp", "date"}
-        ][:num_variables]
+        cols = [c for c in df.columns if c.lower() not in {"time", "timestamp", "date"}][
+            :num_variables
+        ]
         if len(cols) < num_variables:
             raise ValueError(
                 f"expected {num_variables} numeric column(s), found {len(cols)}: {cols}"
@@ -167,9 +163,9 @@ def make_xgb_prepare(
             "X_train": x_train_n,
             "X_test": x_test_n,
             "y_train": y_train_n,
-            "y_test": np.asarray(y_test),     # unnormalized — trainer compares against this
-            "scaler_obj": scaler_y,            # y-scaler (used by trainer for inverse_transform)
-            "scaler_X": scaler_x,              # x-scaler (saved in Bento for predict)
+            "y_test": np.asarray(y_test),  # unnormalized — trainer compares against this
+            "scaler_obj": scaler_y,  # y-scaler (used by trainer for inverse_transform)
+            "scaler_X": scaler_x,  # x-scaler (saved in Bento for predict)
             "look_back": look_back,
         }
 
@@ -189,13 +185,13 @@ def _ts_supervised_structure(data: pd.DataFrame, n_in: int, n_out: int = 1) -> p
     names: list[str] = []
     for i in range(n_in, 0, -1):
         cols.append(data.shift(i))
-        names += [f"var{j+1}(t-{i})" for j in range(n_vars)]
+        names += [f"var{j + 1}(t-{i})" for j in range(n_vars)]
     for i in range(n_out):
         cols.append(data.shift(-i))
         if i == 0:
-            names += [f"var{j+1}(t)" for j in range(n_vars)]
+            names += [f"var{j + 1}(t)" for j in range(n_vars)]
         else:
-            names += [f"var{j+1}(t+{i})" for j in range(n_vars)]
+            names += [f"var{j + 1}(t+{i})" for j in range(n_vars)]
     out = pd.concat(cols, axis=1)
     out.columns = names
     return out.dropna()

@@ -10,7 +10,6 @@ from __future__ import annotations
 import pytest
 
 from intelligence.config.settings import (
-    AppConfig,
     ArimaTaskConfig,
     DriftTaskConfig,
     IntelligenceConfig,
@@ -78,7 +77,7 @@ def test_xgb_builder_attaches_xgb_prepare_via_loader(prom_cfg):
         feature="cpu",
         value_range=(0.0, 1.0),
         steps_back=6,
-        query='avg(rate(node_cpu_seconds_total[30s]))',
+        query="avg(rate(node_cpu_seconds_total[30s]))",
     )
     task = build_xgb_task("cpu_forecast_xgb", task_cfg, prom_cfg)
     assert task.model.name == "xgb"
@@ -86,7 +85,7 @@ def test_xgb_builder_attaches_xgb_prepare_via_loader(prom_cfg):
     # PrometheusLoader because source=prometheus.
     assert task.data_loader.__class__.__name__ == "PrometheusLoader"
     assert task.data_loader.value_col == "cpu"
-    assert task.data_loader.query == 'avg(rate(node_cpu_seconds_total[30s]))'
+    assert task.data_loader.query == "avg(rate(node_cpu_seconds_total[30s]))"
 
 
 def test_lstm_builder_carries_batch_size_into_prepare(prom_cfg):
@@ -95,7 +94,7 @@ def test_lstm_builder_carries_batch_size_into_prepare(prom_cfg):
         feature="cpu",
         steps_back=6,
         batch_size=32,
-        query='avg(node_load1)',
+        query="avg(node_load1)",
         model_params={"hidden_size": 8, "num_epochs": 5},
     )
     task = build_lstm_task("cpu_forecast_lstm", task_cfg, prom_cfg)
@@ -161,7 +160,7 @@ def test_drift_builder_produces_drift_detection_task(prom_cfg):
         value_range=(0.0, 1.0),
         forecaster="cpu_forecast_arima",
         chunk_size=12,
-        query='avg(rate(node_cpu_seconds_total[30s]))',
+        query="avg(rate(node_cpu_seconds_total[30s]))",
     )
     task = build_drift_task("cpu_forecast_arima_drift", task_cfg, prom_cfg)
     assert task.__class__.__name__ == "DriftDetectionTask"

@@ -30,9 +30,13 @@ use. If your query returns raw bytes instead, widen or remove
 ## Run it
 
 ```bash
-INTELLIGENCE_CONFIG_FILE=./examples/mem_forecast/config.yaml \
-INTELLIGENCE_TELEMETRY__PROMETHEUS__ENDPOINT=https://your-prom \
-  docker compose up -d --build --wait
+docker run -d --name icos-intelligence-ocei \
+  -p 3000:3000 \
+  -e INTELLIGENCE_CONFIG=/etc/intelligence/config.yaml \
+  -e INTELLIGENCE_TELEMETRY__PROMETHEUS__ENDPOINT=https://your-prom \
+  -v "$PWD/examples/mem_forecast/config.yaml:/etc/intelligence/config.yaml:ro" \
+  -v intelligence-bentoml:/var/lib/bentoml \
+  ghcr.io/miguel-ceadar/icos-intelligence-ocei:0.1.0
 
 curl -X POST http://localhost:3000/tasks/mem_forecast_arima/train \
   -H 'Content-Type: application/json' \

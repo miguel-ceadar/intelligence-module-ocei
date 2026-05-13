@@ -78,6 +78,13 @@ def metrics():
     return metrics_response()
 
 
+# Hold strong references to in-flight bootstrap tasks so the event-loop
+# garbage collector doesn't reap them mid-run (Python issue: asyncio
+# only weak-refs tasks). The done_callback removes each task once it
+# finishes, so the set stays bounded.
+_bootstrap_tasks: set = set()
+
+
 @app.on_event("startup")
 async def _bootstrap_tasks_on_startup() -> None:
     """Spawn bootstrap coroutines for every task whose config has
@@ -95,7 +102,9 @@ async def _bootstrap_tasks_on_startup() -> None:
         if task_cfg is None or not task_cfg.bootstrap.auto_train_on_startup:
             continue
         task.bootstrap_state = "running"
-        asyncio.create_task(bootstrap_task(task, config.intelligence))
+        coro = asyncio.create_task(bootstrap_task(task, config.intelligence))
+        _bootstrap_tasks.add(coro)
+        coro.add_done_callback(_bootstrap_tasks.discard)
 
 
 @app.get("/healthz")
@@ -122,6 +131,7 @@ def compute_readiness(reg: TaskRegistry) -> tuple[bool, list[dict]]:
 
     try:
         import bentoml
+
         bentoml.models.list()
     except Exception as e:
         failures.append({"check": "bento_store", "detail": str(e)})
@@ -130,16 +140,20 @@ def compute_readiness(reg: TaskRegistry) -> tuple[bool, list[dict]]:
         task = reg.get(name)
         boot_state = getattr(task, "bootstrap_state", None)
         if boot_state == "running":
-            failures.append({
-                "check": f"task:{name}",
-                "detail": "bootstrap in progress",
-            })
+            failures.append(
+                {
+                    "check": f"task:{name}",
+                    "detail": "bootstrap in progress",
+                }
+            )
         elif boot_state == "failed":
             err = getattr(task, "bootstrap_error", "unknown")
-            failures.append({
-                "check": f"task:{name}",
-                "detail": f"bootstrap failed: {err}",
-            })
+            failures.append(
+                {
+                    "check": f"task:{name}",
+                    "detail": f"bootstrap failed: {err}",
+                }
+            )
 
         probe = getattr(task, "is_ready", None)
         if probe is None:
@@ -185,6 +199,7 @@ def list_task_versions(task_name: str) -> dict:
     bento_name = getattr(task, "bento_name", task_name)
 
     import bentoml
+
     matches = [m for m in bentoml.models.list() if m.tag.name == bento_name]
     matches.sort(key=lambda m: m.info.creation_time, reverse=True)
 
@@ -211,6 +226,7 @@ def list_models() -> dict:
     so this endpoint is cheap and doesn't break lazy loading.
     """
     import bentoml
+
     models = bentoml.models.list()
     return {
         "count": len(models),

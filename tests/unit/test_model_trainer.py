@@ -9,7 +9,7 @@ Regression guards:
 
 from __future__ import annotations
 
-from pathlib import Path  # noqa: F401 — kept for the slow LSTM test below
+from pathlib import Path
 
 import pytest
 
@@ -80,8 +80,10 @@ def test_train_arima_returns_expected_tuple(univariate_components):
 
 def test_train_xgb_returns_metrics_and_model(univariate_components):
     ModelTrainer = _maybe("ModelTrainer")
-    components = {**univariate_components,
-                  "model_parameters": {"n_estimators": 20, "max_depth": 3, "eta": 0.1}}
+    components = {
+        **univariate_components,
+        "model_parameters": {"n_estimators": 20, "max_depth": 3, "eta": 0.1},
+    }
     trainer = ModelTrainer(components)
     metrics, model = trainer.train_xgb()
     assert "mae" in metrics

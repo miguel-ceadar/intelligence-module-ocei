@@ -32,8 +32,8 @@ logger = logging.getLogger(__name__)
 
 
 def build_bootstrap_data_source(
-    cfg: "IntelligenceConfig",
-    boot: "BootstrapConfig",
+    cfg: IntelligenceConfig,
+    boot: BootstrapConfig,
 ) -> StaticDataSource | PrometheusDataSource:
     """Translate a ``BootstrapConfig`` into a concrete data source descriptor.
 
@@ -56,7 +56,7 @@ def build_bootstrap_data_source(
     return StaticDataSource(kind="static", name=boot.dataset_name)
 
 
-async def bootstrap_task(task: "BaseTask", cfg: "IntelligenceConfig") -> None:
+async def bootstrap_task(task: BaseTask, cfg: IntelligenceConfig) -> None:
     """Run a single task's bootstrap, updating its state in place.
 
     No-op when the task has no ``tasks[name].bootstrap.auto_train_on_startup``
@@ -81,7 +81,7 @@ async def bootstrap_task(task: "BaseTask", cfg: "IntelligenceConfig") -> None:
     logger.info("task %s: bootstrap starting", task.name)
     try:
         await asyncio.to_thread(task.train, req)
-    except Exception as e:  # noqa: BLE001 — fire-and-forget; surface via state
+    except Exception as e:
         task.bootstrap_state = "failed"
         task.bootstrap_error = f"{type(e).__name__}: {e}"
         logger.exception("task %s: bootstrap failed", task.name)
@@ -91,7 +91,11 @@ async def bootstrap_task(task: "BaseTask", cfg: "IntelligenceConfig") -> None:
     logger.info("task %s: bootstrap complete", task.name)
 
 
-async def bootstrap_all(reg: "TaskRegistry", cfg: "IntelligenceConfig") -> None:
+# Strong-reference set for in-flight bootstraps (see service.py for the rationale).
+_pending: set = set()
+
+
+async def bootstrap_all(reg: TaskRegistry, cfg: IntelligenceConfig) -> None:
     """Fire-and-forget every task's bootstrap. Returns immediately;
     each task's progress is tracked via its own ``bootstrap_state``.
 
@@ -101,4 +105,6 @@ async def bootstrap_all(reg: "TaskRegistry", cfg: "IntelligenceConfig") -> None:
     """
     for name in reg:
         task = reg.get(name)
-        asyncio.create_task(bootstrap_task(task, cfg))
+        coro = asyncio.create_task(bootstrap_task(task, cfg))
+        _pending.add(coro)
+        coro.add_done_callback(_pending.discard)

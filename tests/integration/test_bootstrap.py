@@ -108,7 +108,9 @@ def test_build_data_source_for_prometheus():
                 feature="cpu",
                 query="up",
                 bootstrap=BootstrapConfig(
-                    auto_train_on_startup=True, window="2h", step="1m",
+                    auto_train_on_startup=True,
+                    window="2h",
+                    step="1m",
                 ),
             ),
         },
@@ -218,7 +220,7 @@ def test_readyz_passes_when_bootstrap_complete():
     reg = TaskRegistry()
     reg.register(task)
 
-    ok, failures = compute_readiness(reg)
+    _ok, failures = compute_readiness(reg)
     # Bootstrap state alone shouldn't fail; other probes might (bento store etc.)
     bootstrap_failures = [f for f in failures if "bootstrap" in f["detail"]]
     assert bootstrap_failures == []

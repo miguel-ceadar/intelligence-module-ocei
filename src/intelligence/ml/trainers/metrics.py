@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import logging
 import os
 import tempfile
@@ -35,10 +36,8 @@ def print_size_of_model(model, label: str = "") -> float:
         torch.save(model.state_dict(), path)
         size = os.path.getsize(path)
     finally:
-        try:
+        with contextlib.suppress(OSError):
             os.unlink(path)
-        except OSError:
-            pass
     logger.info("model: %s Size : %s (KB)", label, size / 1e3)
     return size / 1e6
 

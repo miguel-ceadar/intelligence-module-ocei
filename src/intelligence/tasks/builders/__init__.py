@@ -50,8 +50,7 @@ def get_builder(kind: str) -> TaskBuilder:
         return BUILDERS[kind]
     except KeyError as e:
         raise KeyError(
-            f"no builder registered for kind {kind!r}; "
-            f"known kinds: {sorted(BUILDERS)}"
+            f"no builder registered for kind {kind!r}; known kinds: {sorted(BUILDERS)}"
         ) from e
 
 

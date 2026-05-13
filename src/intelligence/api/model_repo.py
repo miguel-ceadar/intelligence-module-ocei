@@ -51,6 +51,7 @@ def push_to_hf(
     token = _require_token()
 
     import bentoml
+
     bento = bentoml.models.get(model_tag)
     folder = Path(bento.path)
     if not folder.exists():
@@ -98,8 +99,7 @@ def pull_from_hf(model_tag: str, repo_id: str) -> str:
         saved = artifact_dir / "saved_model.pkl"
         if not saved.exists():
             raise FileNotFoundError(
-                f"snapshot for {model_tag} missing saved_model.pkl "
-                f"(looked in {artifact_dir})"
+                f"snapshot for {model_tag} missing saved_model.pkl (looked in {artifact_dir})"
             )
 
         with saved.open("rb") as f:
@@ -112,7 +112,9 @@ def pull_from_hf(model_tag: str, repo_id: str) -> str:
                 custom_objects = pickle.load(f)
 
         bento = bentoml.picklable_model.save_model(
-            name, obj, custom_objects=custom_objects,
+            name,
+            obj,
+            custom_objects=custom_objects,
         )
         logger.info("pulled %s → local tag %s", model_tag, bento.tag)
         return str(bento.tag)

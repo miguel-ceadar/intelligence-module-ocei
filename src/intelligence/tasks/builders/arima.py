@@ -14,8 +14,8 @@ if TYPE_CHECKING:
 
 def build_arima_task(
     name: str,
-    task_cfg: "ArimaTaskConfig",
-    intelligence_cfg: "IntelligenceConfig",
+    task_cfg: ArimaTaskConfig,
+    intelligence_cfg: IntelligenceConfig,
 ) -> BaseTask:
     # statsmodels lives inside ArimaModel — lazy-imported here so kinds
     # not configured for this task don't pull it.
@@ -29,7 +29,8 @@ def build_arima_task(
             q=task_cfg.model_params.q,
         ),
         data_loader=build_loader_for_task(
-            intelligence_cfg, name,
+            intelligence_cfg,
+            name,
             value_col=task_cfg.feature,
             query=task_cfg.query,
         ),

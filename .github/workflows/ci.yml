@@ -1,14 +1,10 @@
-# Pull-request + push CI: run the unit + integration suites against
-# the committed lockfile so regressions land before tags do.
+# Pull-request + push CI: lint and run the unit + integration suites
+# against the committed lockfile so regressions land before tags do.
 #
 # Smoke tests are deselected by default (pyproject's pytest addopts)
 # because they need a running compose stack — they live in `make e2e`
 # instead. Tag pushes are intentionally skipped here; the release
 # workflow handles those.
-#
-# Lint gating is deferred: the tree has pre-existing ruff findings and
-# formatting drift that need a focused cleanup pass. Tracked separately;
-# see project memory.
 
 name: ci
 
@@ -22,7 +18,7 @@ permissions:
   contents: read
 
 jobs:
-  test:
+  lint-and-test:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -40,6 +36,12 @@ jobs:
 
       - name: Install (locked, with dev extra)
         run: uv sync --locked --extra dev
+
+      - name: Lint (ruff check)
+        run: uv run ruff check src tests
+
+      - name: Lint (ruff format --check)
+        run: uv run ruff format --check src tests
 
       - name: Test (unit + integration, smoke excluded by config)
         run: uv run pytest

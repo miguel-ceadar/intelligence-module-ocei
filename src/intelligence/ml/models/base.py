@@ -20,8 +20,8 @@ from typing import Any, Protocol, runtime_checkable
 class Model(Protocol):
     """Train one model family, persist as a Bento, predict from one."""
 
-    name: str          # short tag — 'arima', 'xgb', 'lstm'
-    has_drift: bool    # whether this model ships drift detection
+    name: str  # short tag — 'arima', 'xgb', 'lstm'
+    has_drift: bool  # whether this model ships drift detection
 
     def train(
         self,

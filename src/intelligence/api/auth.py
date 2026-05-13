@@ -19,14 +19,16 @@ import os
 
 from fastapi.responses import JSONResponse
 
-_UNAUTHENTICATED_PATHS: frozenset[str] = frozenset({
-    "/healthz",
-    "/readyz",
-    "/metrics",
-    "/docs",
-    "/redoc",
-    "/openapi.json",
-})
+_UNAUTHENTICATED_PATHS: frozenset[str] = frozenset(
+    {
+        "/healthz",
+        "/readyz",
+        "/metrics",
+        "/docs",
+        "/redoc",
+        "/openapi.json",
+    }
+)
 
 
 class BearerTokenMiddleware:

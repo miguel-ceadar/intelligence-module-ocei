@@ -72,36 +72,44 @@ def test_predict_refuses_bento_without_input_spec_by_default():
     task = _task(input_spec=_spec())
     bento = _fake_bento({})  # no input_spec — legacy pretrained Bento
 
-    with mock.patch("bentoml.picklable_model.get", return_value=bento):
-        with pytest.raises(FileNotFoundError, match="unverified|input_spec"):
-            task.predict(PredictRequest(input_series={"cpu": [0.5]}))
+    with (
+        mock.patch("bentoml.picklable_model.get", return_value=bento),
+        pytest.raises(FileNotFoundError, match=r"unverified|input_spec"),
+    ):
+        task.predict(PredictRequest(input_series={"cpu": [0.5]}))
 
 
 def test_predict_refuses_bento_with_mismatched_n_features():
     task = _task(input_spec=_spec(n_features=1, feature_names=("cpu",)))
     bento = _fake_bento({"input_spec": _spec(n_features=3, feature_names=("cpu", "mem", "io"))})
 
-    with mock.patch("bentoml.picklable_model.get", return_value=bento):
-        with pytest.raises(FileNotFoundError, match="n_features|mismatch"):
-            task.predict(PredictRequest(input_series={"cpu": [0.5]}))
+    with (
+        mock.patch("bentoml.picklable_model.get", return_value=bento),
+        pytest.raises(FileNotFoundError, match=r"n_features|mismatch"),
+    ):
+        task.predict(PredictRequest(input_series={"cpu": [0.5]}))
 
 
 def test_predict_refuses_bento_with_mismatched_feature_names():
     task = _task(input_spec=_spec(feature_names=("cpu",)))
     bento = _fake_bento({"input_spec": _spec(feature_names=("memory",))})
 
-    with mock.patch("bentoml.picklable_model.get", return_value=bento):
-        with pytest.raises(FileNotFoundError, match="feature_names|mismatch"):
-            task.predict(PredictRequest(input_series={"cpu": [0.5]}))
+    with (
+        mock.patch("bentoml.picklable_model.get", return_value=bento),
+        pytest.raises(FileNotFoundError, match=r"feature_names|mismatch"),
+    ):
+        task.predict(PredictRequest(input_series={"cpu": [0.5]}))
 
 
 def test_predict_refuses_bento_with_mismatched_steps_back():
     task = _task(input_spec=_spec(steps_back=1))
     bento = _fake_bento({"input_spec": _spec(steps_back=10)})
 
-    with mock.patch("bentoml.picklable_model.get", return_value=bento):
-        with pytest.raises(FileNotFoundError, match="steps_back|mismatch"):
-            task.predict(PredictRequest(input_series={"cpu": [0.5]}))
+    with (
+        mock.patch("bentoml.picklable_model.get", return_value=bento),
+        pytest.raises(FileNotFoundError, match=r"steps_back|mismatch"),
+    ):
+        task.predict(PredictRequest(input_series={"cpu": [0.5]}))
 
 
 def test_override_lets_missing_spec_through():
@@ -143,11 +151,15 @@ def test_bento_spec_stored_as_dict_is_accepted():
     ``InputSpec`` instance. Verify by field, not by class.
     """
     task = _task(input_spec=_spec())
-    bento = _fake_bento({"input_spec": {
-        "n_features": 1,
-        "feature_names": ["cpu"],
-        "steps_back": 1,
-    }})
+    bento = _fake_bento(
+        {
+            "input_spec": {
+                "n_features": 1,
+                "feature_names": ["cpu"],
+                "steps_back": 1,
+            }
+        }
+    )
 
     with mock.patch("bentoml.picklable_model.get", return_value=bento):
         result = task.predict(PredictRequest(input_series={"cpu": [0.5]}))

@@ -97,9 +97,7 @@ class PrometheusSource:
 
 def _parse_query_response(payload: dict, *, expected: str) -> pd.DataFrame:
     if payload.get("status") != "success":
-        raise RuntimeError(
-            f"prometheus query failed: {payload.get('error', 'unknown error')}"
-        )
+        raise RuntimeError(f"prometheus query failed: {payload.get('error', 'unknown error')}")
     data = payload.get("data", {})
     result_type = data.get("resultType")
     if result_type != expected:
@@ -139,7 +137,11 @@ def _vector_to_dataframe(series: list[dict]) -> pd.DataFrame:
     rows = []
     for i, s in enumerate(series):
         ts, val = s["value"]
-        rows.append({"series": s.get("metric", {}).get("__name__", f"s{i}"),
-                     "timestamp": pd.to_datetime(ts, unit="s", utc=True),
-                     "value": float(val)})
+        rows.append(
+            {
+                "series": s.get("metric", {}).get("__name__", f"s{i}"),
+                "timestamp": pd.to_datetime(ts, unit="s", utc=True),
+                "value": float(val),
+            }
+        )
     return pd.DataFrame(rows)

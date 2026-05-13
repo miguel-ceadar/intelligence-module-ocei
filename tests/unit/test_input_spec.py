@@ -46,7 +46,7 @@ def test_input_spec_rejects_wrong_steps_back():
     InputSpec = _import_or_skip("InputSpec")
     ContractViolation = _import_or_skip("ContractViolation")
     spec = InputSpec(n_features=1, feature_names=["cpu"], steps_back=6)
-    with pytest.raises(ContractViolation, match="steps|window|length"):
+    with pytest.raises(ContractViolation, match=r"steps|window|length"):
         spec.validate({"cpu": [0.5] * 4})
 
 
@@ -59,7 +59,7 @@ def test_input_spec_rejects_out_of_range():
         steps_back=6,
         value_range={"cpu": (0.0, 1.0)},
     )
-    with pytest.raises(ContractViolation, match="range|outside"):
+    with pytest.raises(ContractViolation, match=r"range|outside"):
         spec.validate({"cpu": [0.0, 0.5, 87.3, 0.5, 0.5, 0.5]})  # percent vs fraction
 
 

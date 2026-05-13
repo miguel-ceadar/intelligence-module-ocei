@@ -14,8 +14,8 @@ if TYPE_CHECKING:
 
 def build_drift_task(
     name: str,
-    task_cfg: "DriftTaskConfig",
-    intelligence_cfg: "IntelligenceConfig",
+    task_cfg: DriftTaskConfig,
+    intelligence_cfg: IntelligenceConfig,
 ) -> DriftDetectionTask:
     # nannyml is the heavy dep here, but ``intelligence.tasks.drift``
     # already lazy-imports it inside ``DriftDetectionTask.train``. The
@@ -25,7 +25,8 @@ def build_drift_task(
         forecaster_task_name=task_cfg.forecaster,
         model=None,
         data_loader=build_loader_for_task(
-            intelligence_cfg, name,
+            intelligence_cfg,
+            name,
             value_col=task_cfg.feature,
             prepare=make_drift_prepare(value_col=None),
             query=task_cfg.query,

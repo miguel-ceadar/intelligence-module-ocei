@@ -5,6 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
+from pydantic import ValidationError
 
 config = pytest.importorskip("intelligence.config")
 
@@ -55,7 +56,7 @@ def test_config_unknown_kind_raises(tmp_path: Path):
               feature: cpu
         """.strip()
     )
-    with pytest.raises(Exception):  # pydantic ValidationError
+    with pytest.raises(ValidationError):
         config.load_config(p)
 
 
@@ -136,7 +137,7 @@ def test_config_rejects_prometheus_source_without_block(tmp_path: Path):
             source: prometheus
         """.strip()
     )
-    with pytest.raises(Exception):
+    with pytest.raises(ValidationError):
         config.load_config(p)
 
 
@@ -149,5 +150,5 @@ def test_config_unknown_telemetry_source_rejected(tmp_path: Path):
             source: otel
         """.strip()
     )
-    with pytest.raises(Exception):
+    with pytest.raises(ValidationError):
         config.load_config(p)

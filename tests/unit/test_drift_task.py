@@ -56,10 +56,12 @@ def test_drift_train_saves_bento_with_calculator(tmp_path, monkeypatch):
     reference = _stationary_cpu(300)
     task = _drift_task(reference)
 
-    result = task.train(TrainRequest(
-        data_source=StaticDataSource(kind="static", name="ignored"),
-        model_parameters={},
-    ))
+    result = task.train(
+        TrainRequest(
+            data_source=StaticDataSource(kind="static", name="ignored"),
+            model_parameters={},
+        )
+    )
     assert result.metrics["reference_size"] == 300
     bento = task._load_bento()
     assert bento is not None
@@ -71,10 +73,12 @@ def test_drift_predict_on_similar_chunk_reports_no_drift(tmp_path, monkeypatch):
     monkeypatch.setenv("BENTOML_HOME", str(tmp_path / "bentoml"))
     reference = _stationary_cpu(300, mean=0.5, std=0.05, seed=1)
     task = _drift_task(reference)
-    task.train(TrainRequest(
-        data_source=StaticDataSource(kind="static", name="ignored"),
-        model_parameters={},
-    ))
+    task.train(
+        TrainRequest(
+            data_source=StaticDataSource(kind="static", name="ignored"),
+            model_parameters={},
+        )
+    )
 
     # Same distribution as reference — should not alert.
     similar_chunk = _stationary_cpu(12, mean=0.5, std=0.05, seed=2)
@@ -86,10 +90,12 @@ def test_drift_predict_on_shifted_chunk_reports_drift(tmp_path, monkeypatch):
     monkeypatch.setenv("BENTOML_HOME", str(tmp_path / "bentoml"))
     reference = _stationary_cpu(300, mean=0.5, std=0.05, seed=1)
     task = _drift_task(reference)
-    task.train(TrainRequest(
-        data_source=StaticDataSource(kind="static", name="ignored"),
-        model_parameters={},
-    ))
+    task.train(
+        TrainRequest(
+            data_source=StaticDataSource(kind="static", name="ignored"),
+            model_parameters={},
+        )
+    )
 
     # Strongly shifted distribution (mean 0.5 -> 0.9, much tighter std).
     shifted_chunk = _stationary_cpu(12, mean=0.9, std=0.02, seed=3)

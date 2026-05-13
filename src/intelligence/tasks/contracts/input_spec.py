@@ -74,9 +74,7 @@ class InputSpec(BaseModel):
                 parts.append(f"missing features: {missing}")
             if unexpected:
                 parts.append(f"unexpected features: {unexpected}")
-            raise ContractViolation(
-                f"feature names mismatch — {'; '.join(parts)}"
-            )
+            raise ContractViolation(f"feature names mismatch — {'; '.join(parts)}")
 
         # Steps_back (window length per feature)
         for name, values in input_series.items():

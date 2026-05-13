@@ -62,6 +62,7 @@ class ArimaModel:
         }
 
         import bentoml
+
         bento = bentoml.picklable_model.save_model(
             bento_name,
             model,
@@ -85,10 +86,12 @@ class ArimaModel:
 
         scaler = bento_model.custom_objects["scaler_obj"]
         history = list(bento_model.custom_objects.get("historical_data", []))
-        order = tuple(bento_model.custom_objects.get(
-            "arima_order",
-            (self.default_params["p"], self.default_params["d"], self.default_params["q"]),
-        ))
+        order = tuple(
+            bento_model.custom_objects.get(
+                "arima_order",
+                (self.default_params["p"], self.default_params["d"], self.default_params["q"]),
+            )
+        )
 
         from statsmodels.tsa.arima.model import ARIMA
 

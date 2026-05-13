@@ -99,7 +99,7 @@ class TaskInfo(BaseModel):
 class ModelSyncRequest(BaseModel):
     action: Literal["push", "pull"]
     model_tag: str
-    repo_id: str | None = None    # defaults to config.intelligence.model_repo.repo_id
+    repo_id: str | None = None  # defaults to config.intelligence.model_repo.repo_id
     commit_message: str | None = None  # push only
 
 

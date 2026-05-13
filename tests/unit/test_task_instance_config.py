@@ -17,7 +17,6 @@ from intelligence.config.settings import (
     XgbTaskConfig,
 )
 
-
 _adapter = TypeAdapter(TaskInstanceConfig)
 
 
@@ -35,14 +34,16 @@ def test_arima_minimal_block_parses():
 
 
 def test_arima_with_full_overrides_parses():
-    cfg = _parse({
-        "kind": "arima",
-        "feature": "mem",
-        "value_range": [0.0, 1.0],
-        "steps_back": 1,
-        "query": 'avg(rate(foo[1m]))',
-        "model_params": {"p": 2, "d": 1, "q": 1},
-    })
+    cfg = _parse(
+        {
+            "kind": "arima",
+            "feature": "mem",
+            "value_range": [0.0, 1.0],
+            "steps_back": 1,
+            "query": "avg(rate(foo[1m]))",
+            "model_params": {"p": 2, "d": 1, "q": 1},
+        }
+    )
     assert isinstance(cfg, ArimaTaskConfig)
     assert cfg.value_range == (0.0, 1.0)
     assert cfg.model_params.p == 2
@@ -60,27 +61,31 @@ def test_xgb_block_parses_with_defaults():
 def test_xgb_model_params_accept_unknown_xgboost_field():
     # XgbModelParams has extra="allow" so forward-compat fields don't
     # require library updates whenever xgboost adds a knob.
-    cfg = _parse({
-        "kind": "xgb",
-        "feature": "cpu",
-        "model_params": {"n_estimators": 50, "subsample": 0.8},
-    })
+    cfg = _parse(
+        {
+            "kind": "xgb",
+            "feature": "cpu",
+            "model_params": {"n_estimators": 50, "subsample": 0.8},
+        }
+    )
     assert isinstance(cfg, XgbTaskConfig)
     assert cfg.model_params.model_extra == {"subsample": 0.8}
 
 
 def test_lstm_block_carries_batch_size_and_network_shape():
-    cfg = _parse({
-        "kind": "lstm",
-        "feature": "cpu",
-        "batch_size": 32,
-        "model_params": {"hidden_size": 16, "num_epochs": 10},
-    })
+    cfg = _parse(
+        {
+            "kind": "lstm",
+            "feature": "cpu",
+            "batch_size": 32,
+            "model_params": {"hidden_size": 16, "num_epochs": 10},
+        }
+    )
     assert isinstance(cfg, LstmTaskConfig)
     assert cfg.batch_size == 32
     assert cfg.model_params.hidden_size == 16
     assert cfg.model_params.num_epochs == 10
-    assert cfg.model_params.input_size == 1   # default preserved
+    assert cfg.model_params.input_size == 1  # default preserved
 
 
 def test_lstm_horizon_defaults_to_one():
@@ -103,11 +108,13 @@ def test_lstm_horizon_overrides_default():
 
 
 def test_drift_requires_forecaster_reference():
-    cfg = _parse({
-        "kind": "drift",
-        "feature": "cpu",
-        "forecaster": "cpu_forecast_arima",
-    })
+    cfg = _parse(
+        {
+            "kind": "drift",
+            "feature": "cpu",
+            "forecaster": "cpu_forecast_arima",
+        }
+    )
     assert isinstance(cfg, DriftTaskConfig)
     assert cfg.forecaster == "cpu_forecast_arima"
     assert cfg.chunk_size == 12
@@ -140,15 +147,17 @@ def test_value_range_accepts_open_intervals():
 
 
 def test_bootstrap_block_nested_under_task():
-    cfg = _parse({
-        "kind": "arima",
-        "feature": "cpu",
-        "bootstrap": {
-            "auto_train_on_startup": True,
-            "window": "24h",
-            "step": "1m",
-        },
-    })
+    cfg = _parse(
+        {
+            "kind": "arima",
+            "feature": "cpu",
+            "bootstrap": {
+                "auto_train_on_startup": True,
+                "window": "24h",
+                "step": "1m",
+            },
+        }
+    )
     assert isinstance(cfg, ArimaTaskConfig)
     assert cfg.bootstrap.auto_train_on_startup is True
     assert cfg.bootstrap.window == "24h"

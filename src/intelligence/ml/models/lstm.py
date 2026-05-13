@@ -68,12 +68,13 @@ class LstmModel:
             "input_size": params["input_size"],
             "output_size": params["output_size"],
             "hidden_size": params["hidden_size"],
-            "horizon": params["output_size"],   # alias kept for clarity at predict
+            "horizon": params["output_size"],  # alias kept for clarity at predict
             "model_metrics": metrics,
             **(extras or {}),
         }
 
         import bentoml
+
         bento = bentoml.picklable_model.save_model(
             bento_name,
             model,
@@ -105,9 +106,11 @@ class LstmModel:
         look_back = int(bento_model.custom_objects["look_back"])
         num_variables = int(bento_model.custom_objects["num_variables"])
         scaler = bento_model.custom_objects["scaler_obj"]
-        trained_horizon = int(bento_model.custom_objects.get(
-            "horizon", bento_model.custom_objects.get("output_size", 1)
-        ))
+        trained_horizon = int(
+            bento_model.custom_objects.get(
+                "horizon", bento_model.custom_objects.get("output_size", 1)
+            )
+        )
 
         if horizon > trained_horizon:
             raise ValueError(
@@ -119,32 +122,29 @@ class LstmModel:
         # observations across all variables → shape (look_back, num_variables).
         series_keys = list(input_series.keys())[:num_variables]
         if len(series_keys) < num_variables:
-            raise ValueError(
-                f"need {num_variables} input series, got {len(series_keys)}"
-            )
-        window = np.column_stack([
-            np.asarray(input_series[k], dtype=float)[-look_back:]
-            for k in series_keys
-        ])
+            raise ValueError(f"need {num_variables} input series, got {len(series_keys)}")
+        window = np.column_stack(
+            [np.asarray(input_series[k], dtype=float)[-look_back:] for k in series_keys]
+        )
         if window.shape[0] < look_back:
             raise ValueError(
                 f"need at least {look_back} observations per series, got {window.shape[0]}"
             )
 
-        scaled = scaler.transform(window)                # (look_back, num_variables)
+        scaled = scaler.transform(window)  # (look_back, num_variables)
         x = torch.from_numpy(scaled).float().unsqueeze(0)  # (1, look_back, num_variables)
 
         net = bento_model.load_model()  # actual nn.Module
         net.eval()
         with torch.no_grad():
-            y_scaled = net(x).cpu().numpy()             # (1, trained_horizon * num_variables)
+            y_scaled = net(x).cpu().numpy()  # (1, trained_horizon * num_variables)
 
         # The scaler was fit on (n, num_variables); inverse_transform expects
         # that shape regardless of how many horizon steps we're decoding.
         # Reshape (1, H * V) -> (H, V), inverse, then take the first `horizon` rows.
         y_flat = y_scaled.reshape(trained_horizon, num_variables)
-        y_raw = scaler.inverse_transform(y_flat)        # (trained_horizon, num_variables)
-        y_raw = y_raw[:horizon]                          # truncate to requested
+        y_raw = scaler.inverse_transform(y_flat)  # (trained_horizon, num_variables)
+        y_raw = y_raw[:horizon]  # truncate to requested
 
         if num_variables == 1:
             return [ForecastPoint(value=round(float(v), 4)) for v in y_raw[:, 0]]
@@ -174,10 +174,9 @@ def make_lstm_prepare(
 
         from intelligence.ml.trainers.base import TimeSeriesDataset
 
-        cols = [
-            c for c in df.columns
-            if c.lower() not in {"time", "timestamp", "date"}
-        ][:num_variables]
+        cols = [c for c in df.columns if c.lower() not in {"time", "timestamp", "date"}][
+            :num_variables
+        ]
         if len(cols) < num_variables:
             raise ValueError(
                 f"expected {num_variables} numeric column(s), found {len(cols)}: {cols}"
@@ -209,7 +208,7 @@ def make_lstm_prepare(
             "X_train": x_train_t,
             "X_test": x_test_t,
             "y_train": y_train_t,
-            "y_test": y_test_t.numpy(),   # trainer inverse-transforms this; needs ndarray
+            "y_test": y_test_t.numpy(),  # trainer inverse-transforms this; needs ndarray
             "train_dataset": TimeSeriesDataset(x_train_t, y_train_t),
             "test_dataset": TimeSeriesDataset(x_test_t, y_test_t),
             "batch_size": batch_size,

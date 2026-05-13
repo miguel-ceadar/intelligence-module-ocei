@@ -14,8 +14,8 @@ if TYPE_CHECKING:
 
 def build_lstm_task(
     name: str,
-    task_cfg: "LstmTaskConfig",
-    intelligence_cfg: "IntelligenceConfig",
+    task_cfg: LstmTaskConfig,
+    intelligence_cfg: IntelligenceConfig,
 ) -> BaseTask:
     # torch is the heaviest dep we ship — lazy-imported here so non-LSTM
     # deployments don't pay the cost on registry build.
@@ -29,7 +29,8 @@ def build_lstm_task(
         name=name,
         model=LstmModel(**model_params),
         data_loader=build_loader_for_task(
-            intelligence_cfg, name,
+            intelligence_cfg,
+            name,
             value_col=task_cfg.feature,
             prepare=make_lstm_prepare(
                 look_back=task_cfg.steps_back,

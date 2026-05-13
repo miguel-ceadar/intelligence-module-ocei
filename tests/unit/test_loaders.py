@@ -124,12 +124,12 @@ def test_prometheus_loader_passes_query_to_source():
     from intelligence.tasks.loaders import PrometheusLoader
 
     source = _FakeSource(_fake_promql_df())
-    loader = PrometheusLoader(source=source, query='rate(node_cpu_seconds_total[5m])')
+    loader = PrometheusLoader(source=source, query="rate(node_cpu_seconds_total[5m])")
 
     loader(PrometheusDataSource(kind="prometheus", window="1h", step="1m"))
 
     assert len(source.calls) == 1
-    assert source.calls[0]["query"] == 'rate(node_cpu_seconds_total[5m])'
+    assert source.calls[0]["query"] == "rate(node_cpu_seconds_total[5m])"
 
 
 def test_prometheus_loader_translates_window_step_to_datetime():

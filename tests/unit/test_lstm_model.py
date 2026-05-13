@@ -28,14 +28,21 @@ def test_make_lstm_prepare_yields_3d_tensors():
     comps = prep(_synthetic_cpu())
 
     for key in (
-        "X_train", "X_test", "y_train", "y_test",
-        "train_dataset", "test_dataset", "batch_size",
-        "scaler_obj", "look_back", "num_variables",
+        "X_train",
+        "X_test",
+        "y_train",
+        "y_test",
+        "train_dataset",
+        "test_dataset",
+        "batch_size",
+        "scaler_obj",
+        "look_back",
+        "num_variables",
     ):
         assert key in comps, f"missing component: {key}"
     assert comps["X_train"].dim() == 3
-    assert comps["X_train"].shape[1] == 5    # look_back
-    assert comps["X_train"].shape[2] == 1    # num_variables
+    assert comps["X_train"].shape[1] == 5  # look_back
+    assert comps["X_train"].shape[2] == 1  # num_variables
 
 
 @pytest.mark.slow
@@ -107,7 +114,10 @@ def test_lstm_train_with_horizon_three_then_predict(tmp_path, monkeypatch):
     horizon = 3
     try:
         prep = make_lstm_prepare(
-            look_back=6, num_variables=1, batch_size=16, horizon=horizon,
+            look_back=6,
+            num_variables=1,
+            batch_size=16,
+            horizon=horizon,
         )
     except TypeError:
         pytest.skip("make_lstm_prepare doesn't accept horizon yet")
@@ -140,7 +150,8 @@ def test_lstm_train_with_horizon_three_then_predict(tmp_path, monkeypatch):
         # LSTM ships without CIs (MC-dropout deferred per memory note).
         assert (
             getattr(point, "lower", None) is None
-            if not isinstance(point, dict) else point.get("lower") is None
+            if not isinstance(point, dict)
+            else point.get("lower") is None
         )
 
 
@@ -162,7 +173,7 @@ def test_lstm_predict_rejects_horizon_greater_than_trained_output_size(tmp_path,
         "scaler_obj": MinMaxScaler().fit(np.array([[0.0], [1.0]])),
         "look_back": 6,
         "num_variables": 1,
-        "output_size": 2,   # trained max horizon
+        "output_size": 2,  # trained max horizon
     }
     window = [0.1, 0.2, 0.3, 0.4, 0.5, 0.6]
     try:

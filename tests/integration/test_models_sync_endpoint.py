@@ -17,12 +17,14 @@ pytestmark = pytest.mark.integration
 @pytest.fixture
 def app():
     from intelligence.api.service import app as _app
+
     return _app
 
 
 @pytest.fixture
 def client(app):
     from fastapi.testclient import TestClient
+
     return TestClient(app)
 
 
@@ -44,7 +46,9 @@ def test_sync_endpoint_dispatches_push(monkeypatch, client):
 
     # Flip the toggle on the live service config.
     monkeypatch.setattr(
-        service.config.intelligence.model_repo, "hf_enabled", True,
+        service.config.intelligence.model_repo,
+        "hf_enabled",
+        True,
     )
     monkeypatch.setenv("HF_TOKEN", "fake")
 
@@ -66,7 +70,9 @@ def test_sync_endpoint_401_when_token_missing(monkeypatch, client):
     from intelligence.api import service
 
     monkeypatch.setattr(
-        service.config.intelligence.model_repo, "hf_enabled", True,
+        service.config.intelligence.model_repo,
+        "hf_enabled",
+        True,
     )
     monkeypatch.delenv("HF_TOKEN", raising=False)
 

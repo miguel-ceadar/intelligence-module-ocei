@@ -36,9 +36,7 @@ class StaticSource:
     ) -> pd.DataFrame:
         path = self.base_dir / query
         if not path.exists():
-            raise FileNotFoundError(
-                f"dataset not found: {query} (looked in {self.base_dir})"
-            )
+            raise FileNotFoundError(f"dataset not found: {query} (looked in {self.base_dir})")
         return pd.read_csv(path).dropna()
 
     def is_ready(self) -> tuple[bool, str]:

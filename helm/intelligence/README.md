@@ -107,7 +107,7 @@ every 30 s by default.
 Dry-render the chart to see what would be installed:
 
 ```bash
-helm template intelligence ./helm/intelligence -f values.prod.yaml | less
+helm template icos-intelligence-ocei ./helm/intelligence -f values.prod.yaml | less
 ```
 
 Lint:
@@ -119,5 +119,5 @@ helm lint ./helm/intelligence
 Install onto a test cluster (kind / minikube / k3d):
 
 ```bash
-helm install --dry-run --debug intelligence ./helm/intelligence
+helm install --dry-run --debug icos-intelligence-ocei ./helm/intelligence
 ```

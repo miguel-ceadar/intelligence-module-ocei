@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from unittest import mock
 
 import pytest
@@ -20,6 +20,7 @@ def app():
 @pytest.fixture
 def client(app):
     from fastapi.testclient import TestClient
+
     return TestClient(app)
 
 
@@ -58,9 +59,9 @@ def test_versions_endpoint_sorts_newest_first(client):
     if "cpu_forecast_arima" not in api.registry:
         pytest.skip("cpu_forecast_arima not registered in this config")
 
-    older = _fake_model("cpu_forecast_arima", "abc111", datetime(2026, 1, 1, tzinfo=timezone.utc))
-    newer = _fake_model("cpu_forecast_arima", "abc222", datetime(2026, 5, 1, tzinfo=timezone.utc))
-    unrelated = _fake_model("mem_forecast_arima", "abc333", datetime(2026, 6, 1, tzinfo=timezone.utc))
+    older = _fake_model("cpu_forecast_arima", "abc111", datetime(2026, 1, 1, tzinfo=UTC))
+    newer = _fake_model("cpu_forecast_arima", "abc222", datetime(2026, 5, 1, tzinfo=UTC))
+    unrelated = _fake_model("mem_forecast_arima", "abc333", datetime(2026, 6, 1, tzinfo=UTC))
 
     with mock.patch("bentoml.models.list", return_value=[older, newer, unrelated]):
         resp = client.get("/tasks/cpu_forecast_arima/versions")

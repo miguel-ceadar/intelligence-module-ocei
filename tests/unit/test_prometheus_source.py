@@ -37,12 +37,14 @@ def test_fetch_range_parses_single_series(mock_get):
     from intelligence.telemetry import PrometheusSource
 
     mock_get.return_value = _mock_get(
-        _matrix_response([
-            {
-                "metric": {"__name__": "node_cpu"},
-                "values": [[1700000000, "0.42"], [1700000060, "0.43"]],
-            }
-        ])
+        _matrix_response(
+            [
+                {
+                    "metric": {"__name__": "node_cpu"},
+                    "values": [[1700000000, "0.42"], [1700000060, "0.43"]],
+                }
+            ]
+        )
     )
 
     src = PrometheusSource(endpoint="http://prom:9090")
@@ -64,10 +66,12 @@ def test_fetch_range_merges_multi_series_on_timestamp(mock_get):
     from intelligence.telemetry import PrometheusSource
 
     mock_get.return_value = _mock_get(
-        _matrix_response([
-            {"metric": {"id": "a"}, "values": [[1700000000, "1.0"], [1700000060, "1.1"]]},
-            {"metric": {"id": "b"}, "values": [[1700000000, "2.0"], [1700000060, "2.1"]]},
-        ])
+        _matrix_response(
+            [
+                {"metric": {"id": "a"}, "values": [[1700000000, "1.0"], [1700000060, "1.1"]]},
+                {"metric": {"id": "b"}, "values": [[1700000000, "2.0"], [1700000060, "2.1"]]},
+            ]
+        )
     )
 
     src = PrometheusSource(endpoint="http://prom:9090")
@@ -143,11 +147,13 @@ def test_tls_skip_verify_is_forwarded(mock_get):
 def test_error_status_payload_raises(mock_get):
     from intelligence.telemetry import PrometheusSource
 
-    mock_get.return_value = _mock_get({
-        "status": "error",
-        "errorType": "bad_data",
-        "error": "syntax error in query",
-    })
+    mock_get.return_value = _mock_get(
+        {
+            "status": "error",
+            "errorType": "bad_data",
+            "error": "syntax error in query",
+        }
+    )
 
     src = PrometheusSource(endpoint="http://prom:9090")
     with pytest.raises(RuntimeError, match="syntax error in query"):

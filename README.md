@@ -22,19 +22,24 @@ Prometheus stack, beside or instead of the original ICOS deployment.
 
 ## What's included
 
-Four built-in tasks (opt in via config):
+Four algorithm **kinds** you compose into tasks via YAML:
 
-| Task | Model | Use |
+| Kind | Model | Forecast shape |
 |---|---|---|
-| `cpu_forecast_arima` | ARIMA | 1-step CPU forecast off the last observation |
-| `cpu_forecast_xgb` | XGBoost | 1-step CPU forecast from a 6-observation window |
-| `cpu_forecast_lstm` | PyTorch LSTM | 1-step CPU forecast from a 6-observation window |
-| `cpu_forecast_arima_drift` | NannyML | Univariate drift detection paired with the ARIMA forecaster |
+| `arima` | statsmodels ARIMA | Single or multi-step; native 95 % confidence intervals |
+| `xgb` | XGBoost regressor | Sliding-window, recursive multi-step (no CI) |
+| `lstm` | PyTorch LSTM | Sliding-window, direct multi-step (CI deferred) |
+| `drift` | NannyML | Univariate drift alert on a chunk, paired with a forecaster |
+
+A *task* is one PromQL query + one kind. Declare as many as you want
+under `tasks:` in the config — no Python edits. The
+[`examples/`](examples/) directory has ready-to-run configs for CPU,
+memory, k8s cluster metrics, and energy forecasting.
 
 Two data sources, picked once per deployment:
 
 - **`prometheus`** — PromQL `/api/v1/query_range` against your Prometheus or Thanos.
-- **`static`** — CSVs from the bundled `samples/` directory; used for demos and tests.
+- **`static`** — CSVs from the bundled `samples/` directory; used for the in-repo demo and tests.
 
 ## Quick start
 
@@ -94,17 +99,6 @@ on failure. `make down-demo` tears it down. Compose lives in this repo
 solely for this demo — pilots deploy via Helm or `docker run` against
 their own Prometheus.
 
-### Local dev (no Docker)
-
-```bash
-uv sync
-uv run uvicorn intelligence.api.service:app --port 3000
-```
-
-Contributors hacking on the code who want the demo stack to run their
-local changes: `make e2e-dev` (rebuilds the image from source via the
-`docker-compose.dev.yml` overlay).
-
 ### Calling the API
 
 Train + predict on the bundled CSV sample — works without a Prometheus:
@@ -150,16 +144,9 @@ direct-output LSTM leave them empty).
 
 ### Observability
 
-`/metrics` exposes Prometheus-format counters and histograms: HTTP
-request count + latency (route-normalised so per-task paths collapse
-to `/tasks/{task}/...`), per-task train and predict counts + durations,
-and a gauge for registered tasks. Probe endpoints (`/healthz`,
-`/readyz`) and `/metrics` itself are excluded to keep the time series
-honest.
-
-Logs are emitted as JSON to stdout (`{timestamp, level, logger,
-message, request_id, ...}`). Every HTTP request carries a short
-`request_id` you can grep across logs for one call's full trace.
+`/metrics` exposes Prometheus counters and histograms (HTTP, per-task
+train/predict). Logs are JSON to stdout, each request tagged with a
+short `request_id` for grepping across one call's trace.
 
 ## Configuration
 
@@ -263,22 +250,12 @@ sense for the deployment.
 intelligence:
   model_repo:
     hf_enabled: true
-    repo_id: ICOS-AI/ICOS-AI_icos_models
+    repo_id: <org>/<repo>
 ```
 
-The HF token is read from `HF_TOKEN` at request time — not stored in
-config. Then:
-
-```bash
-export HF_TOKEN=...
-curl -X POST http://localhost:3000/models/sync \
-  -H 'Content-Type: application/json' \
-  -d '{"action": "push", "model_tag": "metrics_utilization_model_arima:latest"}'
-
-curl -X POST http://localhost:3000/models/sync \
-  -H 'Content-Type: application/json' \
-  -d '{"action": "pull", "model_tag": "metrics_utilization_model_arima:abc123"}'
-```
+The HF token is read from the `HF_TOKEN` environment variable at
+request time — never stored in config. Request shape for
+`POST /models/sync` is at `/docs`.
 
 ### Pretrained Bentos
 
@@ -380,20 +357,18 @@ compose/                     demo-only configs (intelligence.demo.yaml, promethe
 .github/workflows/           release pipeline (image + OCI chart → GHCR)
 ```
 
-The four user-facing domains (tasks, api, telemetry, ml) map to the
-architecture sketch in `modules.png`.
-
 ## Development
 
+For contributors hacking on the code rather than deploying it:
+
 ```bash
-make install-dev               # uv sync --extra dev
-make test                      # pytest (excludes smoke)
-make lint                      # ruff check + format
-make up-demo / make down-demo  # demo stack (pulls GHCR image + bundled prom)
-make smoke                     # pytest -m smoke against whichever stack is running
-make e2e                       # one-shot: demo stack + smoke, dumps logs on failure
-make e2e-dev                   # same, but rebuilds the image from local sources
-make chart-lint                # helm lint the chart
+uv sync --extra dev                  # install lib + dev deps
+uv run uvicorn intelligence.api.service:app --port 3000   # run the service directly
+
+make test                            # pytest (excludes smoke)
+make lint                            # ruff check + format
+make chart-lint                      # helm lint the chart
+make e2e-dev                         # demo stack with the image rebuilt from local src
 ```
 
 macOS arm64 quick notes:

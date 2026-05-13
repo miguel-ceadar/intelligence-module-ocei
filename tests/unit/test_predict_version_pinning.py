@@ -49,10 +49,12 @@ def test_request_pin_overrides_everything():
     )
     fake = _fake_bento("request_pin_v2")
     with mock.patch("bentoml.picklable_model.get", return_value=fake) as get:
-        resp = task.predict(PredictRequest(
-            input_series={"x": [1.0]},
-            model_version="request_pin_v2",
-        ))
+        resp = task.predict(
+            PredictRequest(
+                input_series={"x": [1.0]},
+                model_version="request_pin_v2",
+            )
+        )
     get.assert_called_once_with("t:request_pin_v2")
     assert resp.model_version == "request_pin_v2"
 
@@ -92,24 +94,30 @@ def test_pinned_versions_cached_separately_from_latest():
         return fake_pinned if tag.endswith(":v0") else fake_latest
 
     with mock.patch("bentoml.picklable_model.get", side_effect=by_tag) as get:
-        task.predict(PredictRequest(input_series={"x": [1.0]}))                          # caches latest=v1
-        task.predict(PredictRequest(input_series={"x": [1.0]}, model_version="v0"))      # caches v0
+        task.predict(PredictRequest(input_series={"x": [1.0]}))  # caches latest=v1
+        task.predict(PredictRequest(input_series={"x": [1.0]}, model_version="v0"))  # caches v0
         # _invalidate clears only :latest, not v0
         task._invalidate()
-        task.predict(PredictRequest(input_series={"x": [1.0]}, model_version="v0"))      # served from cache
-        task.predict(PredictRequest(input_series={"x": [1.0]}))                          # latest re-fetched
+        task.predict(
+            PredictRequest(input_series={"x": [1.0]}, model_version="v0")
+        )  # served from cache
+        task.predict(PredictRequest(input_series={"x": [1.0]}))  # latest re-fetched
     # 3 actual store reads: initial latest, initial v0, post-invalidate latest
     assert get.call_count == 3
 
 
 def test_missing_pinned_version_raises_filenotfound_with_helpful_message():
     task = BaseTask(name="t", model=_make_model(), data_loader=mock.MagicMock())
-    with mock.patch(
-        "bentoml.picklable_model.get",
-        side_effect=bentoml.exceptions.NotFound("not in store"),
+    with (
+        mock.patch(
+            "bentoml.picklable_model.get",
+            side_effect=bentoml.exceptions.NotFound("not in store"),
+        ),
+        pytest.raises(FileNotFoundError, match="t:abc-does-not-exist"),
     ):
-        with pytest.raises(FileNotFoundError, match="t:abc-does-not-exist"):
-            task.predict(PredictRequest(
+        task.predict(
+            PredictRequest(
                 input_series={"x": [1.0]},
                 model_version="abc-does-not-exist",
-            ))
+            )
+        )

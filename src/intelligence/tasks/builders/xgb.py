@@ -14,8 +14,8 @@ if TYPE_CHECKING:
 
 def build_xgb_task(
     name: str,
-    task_cfg: "XgbTaskConfig",
-    intelligence_cfg: "IntelligenceConfig",
+    task_cfg: XgbTaskConfig,
+    intelligence_cfg: IntelligenceConfig,
 ) -> BaseTask:
     # xgboost (+ libgomp at the OS level) lives inside XgbModel — lazy.
     from intelligence.ml.models.xgb import XgbModel, make_xgb_prepare
@@ -26,7 +26,8 @@ def build_xgb_task(
         name=name,
         model=XgbModel(**task_cfg.model_params.model_dump()),
         data_loader=build_loader_for_task(
-            intelligence_cfg, name,
+            intelligence_cfg,
+            name,
             value_col=task_cfg.feature,
             prepare=make_xgb_prepare(look_back=task_cfg.steps_back, num_variables=1),
             query=task_cfg.query,

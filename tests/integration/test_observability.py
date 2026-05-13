@@ -15,6 +15,7 @@ api = pytest.importorskip("intelligence.api.service")
 @pytest.fixture
 def client():
     from fastapi.testclient import TestClient
+
     return TestClient(api.app)
 
 
@@ -72,7 +73,9 @@ def test_dynamic_paths_normalize_to_route_pattern(client):
     client.post("/tasks/no_such_task/predict", json={"input_series": {"x": [0.1]}})
     # The "{task}" template should have at least one sample now.
     value = HTTP_REQUESTS.labels(
-        route="/tasks/{task}/predict", method="POST", status="404",
+        route="/tasks/{task}/predict",
+        method="POST",
+        status="404",
     )._value.get()
     assert value >= 1
 
@@ -81,8 +84,13 @@ def test_request_id_filter_injects_id_onto_log_records():
     from intelligence.api.observability import RequestIdFilter, _request_id
 
     record = logging.LogRecord(
-        name="test", level=logging.INFO, pathname=__file__, lineno=1,
-        msg="hi", args=(), exc_info=None,
+        name="test",
+        level=logging.INFO,
+        pathname=__file__,
+        lineno=1,
+        msg="hi",
+        args=(),
+        exc_info=None,
     )
     token = _request_id.set("deadbeef")
     try:
@@ -96,8 +104,13 @@ def test_json_formatter_produces_well_formed_object_with_extras():
     from intelligence.api.observability import JsonFormatter
 
     record = logging.LogRecord(
-        name="test", level=logging.INFO, pathname=__file__, lineno=1,
-        msg="hello %s", args=("world",), exc_info=None,
+        name="test",
+        level=logging.INFO,
+        pathname=__file__,
+        lineno=1,
+        msg="hello %s",
+        args=("world",),
+        exc_info=None,
     )
     record.task_name = "cpu_forecast_arima"
     record.duration_ms = 12.3

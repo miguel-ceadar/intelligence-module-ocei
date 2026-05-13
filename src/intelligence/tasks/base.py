@@ -18,7 +18,7 @@ builder under ``intelligence.tasks.builders``.
 from __future__ import annotations
 
 import logging
-from collections.abc import Callable  # noqa: F401  used by typing
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
 
@@ -123,7 +123,7 @@ class BaseTask:
     # Optional because subclasses (e.g. ``DriftDetectionTask``) may
     # override both lifecycle methods and not use a Model at all.
     model: Model | None
-    data_loader: Callable[["DataSource"], dict]
+    data_loader: Callable[[DataSource], dict]
     bento_name: str | None = None
     input_spec: InputSpec | None = None
     # When True, predict serves Bentos whose stored input_spec is missing
@@ -182,6 +182,7 @@ class BaseTask:
         if resolved in self._cached_bentos:
             return self._cached_bentos[resolved]
         import bentoml
+
         try:
             bento = bentoml.picklable_model.get(f"{self.bento_name}:{resolved}")
         except bentoml.exceptions.NotFound:
@@ -308,7 +309,7 @@ def _spec_mismatch(stored: Any, expected: InputSpec) -> str | None:
     return None
 
 
-def build_registry_from_config(cfg: "IntelligenceConfig") -> TaskRegistry:
+def build_registry_from_config(cfg: IntelligenceConfig) -> TaskRegistry:
     """Build a registry from the typed ``cfg.tasks`` dict.
 
     Iterates each ``(name, task_cfg)`` pair, dispatches on

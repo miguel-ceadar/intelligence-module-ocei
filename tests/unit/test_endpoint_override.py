@@ -32,7 +32,9 @@ def _maybe_field(model, name: str):
 def test_prometheus_data_source_accepts_optional_endpoint_override():
     _maybe_field(PrometheusDataSource, "endpoint")
     desc = PrometheusDataSource(
-        kind="prometheus", window="1h", step="1m",
+        kind="prometheus",
+        window="1h",
+        step="1m",
         endpoint="https://other-prom.example:9090",
     )
     assert desc.endpoint == "https://other-prom.example:9090"
@@ -71,7 +73,9 @@ def test_loader_rejects_override_when_flag_off():
     )
     loader = build_loader_for_task(cfg, "cpu_forecast_arima", query="up")
     desc = PrometheusDataSource(
-        kind="prometheus", window="1h", step="1m",
+        kind="prometheus",
+        window="1h",
+        step="1m",
         endpoint="https://other:9090",
     )
     with pytest.raises(ValueError, match="allow_endpoint_override"):
@@ -98,7 +102,9 @@ def test_loader_uses_override_when_flag_on():
     )
     loader = build_loader_for_task(cfg, "cpu_forecast_arima", query="up")
     desc = PrometheusDataSource(
-        kind="prometheus", window="1h", step="1m",
+        kind="prometheus",
+        window="1h",
+        step="1m",
         endpoint="https://other-prom.internal:9090",
     )
 
@@ -106,12 +112,14 @@ def test_loader_uses_override_when_flag_on():
     # capture the source that ends up serving the call.
     captured_endpoints: list[str] = []
 
-    def fake_fetch_range(self, query, start, end, step):  # noqa: N805
+    def fake_fetch_range(self, query, start, end, step):
         captured_endpoints.append(self.endpoint)
-        return pd.DataFrame({
-            "timestamp": [datetime.now(UTC)] * 50,
-            "value": [0.5 + i * 0.001 for i in range(50)],
-        })
+        return pd.DataFrame(
+            {
+                "timestamp": [datetime.now(UTC)] * 50,
+                "value": [0.5 + i * 0.001 for i in range(50)],
+            }
+        )
 
     with mock.patch(
         "intelligence.telemetry.PrometheusSource.fetch_range",
@@ -141,12 +149,14 @@ def test_loader_falls_back_to_configured_endpoint_when_no_override():
 
     captured: list[str] = []
 
-    def fake_fetch_range(self, query, start, end, step):  # noqa: N805
+    def fake_fetch_range(self, query, start, end, step):
         captured.append(self.endpoint)
-        return pd.DataFrame({
-            "timestamp": [datetime.now(UTC)] * 50,
-            "value": [0.5 + i * 0.001 for i in range(50)],
-        })
+        return pd.DataFrame(
+            {
+                "timestamp": [datetime.now(UTC)] * 50,
+                "value": [0.5 + i * 0.001 for i in range(50)],
+            }
+        )
 
     with mock.patch(
         "intelligence.telemetry.PrometheusSource.fetch_range",

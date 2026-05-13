@@ -154,8 +154,7 @@ class PrometheusLoader:
     def __call__(self, descriptor: PrometheusDataSource) -> dict:
         if not isinstance(descriptor, PrometheusDataSource):
             raise ValueError(
-                f"PrometheusLoader expects PrometheusDataSource, "
-                f"got {type(descriptor).__name__}"
+                f"PrometheusLoader expects PrometheusDataSource, got {type(descriptor).__name__}"
             )
 
         source = self._resolve_source(descriptor)
@@ -222,7 +221,7 @@ def prometheus_loader(
 
 
 def build_loader_for_task(
-    cfg: "IntelligenceConfig",
+    cfg: IntelligenceConfig,
     task_name: str,
     value_col: str | None = None,
     prepare: Callable[[pd.DataFrame], dict] | None = None,
@@ -242,13 +241,10 @@ def build_loader_for_task(
     if cfg.telemetry.source == "prometheus":
         prom = cfg.telemetry.prometheus
         if prom is None:  # already enforced by TelemetryConfig validator, defensive
-            raise ValueError(
-                "telemetry.source='prometheus' requires telemetry.prometheus block"
-            )
+            raise ValueError("telemetry.source='prometheus' requires telemetry.prometheus block")
         if query is None:
             raise ValueError(
-                f"no PromQL query for task {task_name!r}; "
-                "set `query:` on the task config block"
+                f"no PromQL query for task {task_name!r}; set `query:` on the task config block"
             )
         source_kwargs = {
             "endpoint": prom.endpoint,

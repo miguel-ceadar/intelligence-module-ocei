@@ -40,7 +40,8 @@ def test_importing_api_does_not_load_any_bento_models():
             if sub is None or not hasattr(sub, "get"):
                 continue
             p = mock.patch.object(
-                sub, "get",
+                sub,
+                "get",
                 side_effect=lambda *a, _fw=fw, **kw: calls.append(f"{_fw}.get({a!r})"),
             )
         except Exception:
