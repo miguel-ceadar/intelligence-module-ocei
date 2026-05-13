@@ -69,6 +69,19 @@ persistence:
   accessMode: ReadWriteOnce
   size: 10Gi
 
+# -- Startup probe. Off by default ({} → block omitted). Enable for
+# bootstrap-enabled deployments where the first training run can take
+# minutes against real PromQL windows — the 10s liveness budget alone
+# is not enough.
+startupProbe: {}
+  # httpGet:
+  #   path: /readyz
+  #   port: http
+  # initialDelaySeconds: 5
+  # periodSeconds: 10
+  # timeoutSeconds: 2
+  # failureThreshold: 30        # 30 × 10s = 5 min budget for bootstrap
+
 livenessProbe:
   httpGet:
     path: /healthz
@@ -120,6 +133,49 @@ securityContext:
     drop:
       - ALL
   readOnlyRootFilesystem: false   # uv writes bytecode under /app/.venv at startup
+
+# -- PodDisruptionBudget. Off by default at replicaCount=1 (where a PDB
+# is mostly cosmetic). Enable for multi-replica deployments to keep at
+# least one pod alive during voluntary disruptions (node drains, etc).
+podDisruptionBudget:
+  enabled: false
+  minAvailable: 1
+  # maxUnavailable: 0           # set one of minAvailable / maxUnavailable
+
+# -- NetworkPolicy. Off by default. When enabled, the chart locks the
+# pod down to: DNS egress (unrestricted to cluster DNS), plus whatever
+# you list under `ingress` and `egress`. Pilots running in zero-trust
+# clusters should turn this on and explicitly list Prometheus + HF
+# endpoints as egress.
+networkPolicy:
+  enabled: false
+  ingress: []
+    # - from:
+    #     - namespaceSelector:
+    #         matchLabels:
+    #           kubernetes.io/metadata.name: monitoring
+    #   ports:
+    #     - protocol: TCP
+    #       port: 3000
+  egress: []
+    # - to:
+    #     - namespaceSelector:
+    #         matchLabels:
+    #           kubernetes.io/metadata.name: monitoring
+    #   ports:
+    #     - protocol: TCP
+    #       port: 9090
+    # - to:
+    #     - ipBlock:
+    #         cidr: 0.0.0.0/0
+    #         except:
+    #           - 169.254.169.254/32      # cloud metadata
+    #           - 10.0.0.0/8
+    #           - 172.16.0.0/12
+    #           - 192.168.0.0/16
+    #   ports:
+    #     - protocol: TCP
+    #       port: 443                     # HuggingFace HTTPS
 
 nodeSelector: {}
 tolerations: []

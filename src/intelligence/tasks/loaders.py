@@ -15,11 +15,13 @@ factories in ``catalog.py`` don't churn.
 
 from __future__ import annotations
 
+import ipaddress
 import re
 from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import TYPE_CHECKING
+from urllib.parse import urlparse
 
 import pandas as pd
 from sklearn.preprocessing import MinMaxScaler
@@ -29,6 +31,48 @@ from intelligence.telemetry import PrometheusSource, StaticSource, TelemetrySour
 
 if TYPE_CHECKING:
     from intelligence.config.settings import IntelligenceConfig
+
+
+# Hostnames we always refuse regardless of DNS — these are explicit
+# operator footguns. DNS-resolution-based filtering is intentionally not
+# done here: an authed /train POST runs in a sync handler on a thread,
+# but resolving every override would add a blocking call per request and
+# is still defeatable with rebinding. Cluster-level egress controls
+# (NetworkPolicy, mesh sidecar) are the real defense; this gate catches
+# honest mistakes.
+_FORBIDDEN_HOSTNAMES = frozenset({"localhost", "localhost.localdomain"})
+
+
+def _validate_override_endpoint(url: str) -> None:
+    """Refuse override URLs that would let an authed /train POST probe
+    loopback / metadata / private / link-local addresses.
+    """
+    parsed = urlparse(url)
+    if parsed.scheme != "https":
+        raise ValueError(
+            f"endpoint override must use https://, got scheme {parsed.scheme!r} in {url!r}"
+        )
+    host = parsed.hostname
+    if not host:
+        raise ValueError(f"endpoint override has no host: {url!r}")
+    if host.lower() in _FORBIDDEN_HOSTNAMES:
+        raise ValueError(f"endpoint override host {host!r} is loopback — rejected")
+    try:
+        ip = ipaddress.ip_address(host)
+    except ValueError:
+        # Hostname literal, not an IP. Accept — see module note above.
+        return
+    if (
+        ip.is_loopback
+        or ip.is_link_local  # includes 169.254.169.254 cloud metadata
+        or ip.is_private  # RFC1918 + IPv6 unique-local
+        or ip.is_multicast
+        or ip.is_reserved
+        or ip.is_unspecified
+    ):
+        raise ValueError(
+            f"endpoint override IP {ip} is loopback/private/link-local/metadata — rejected"
+        )
 
 
 class StaticCsvLoader:
@@ -162,6 +206,16 @@ class PrometheusLoader:
         start = end - _parse_duration(descriptor.window)
         step = _parse_duration(descriptor.step)
         df = source.fetch_range(self.query, start=start, end=end, step=step)
+        if df.empty:
+            # The most common operator mistake is a query that matches no
+            # series over the requested window. Surface this before it
+            # turns into an opaque numpy IndexError inside the trainer.
+            raise ValueError(
+                f"PromQL returned no data — query {self.query!r} matched "
+                f"zero series over the {descriptor.window} window. Check "
+                f"the query against the live Prometheus and that the "
+                f"window covers a period where data exists."
+            )
         # Single-series PromQL responses always come back with a literal
         # "value" column. Rename to the task's feature name so downstream
         # prepares — and any column-name round-trip into a Bento's stored
@@ -191,6 +245,7 @@ class PrometheusLoader:
                 "endpoint override requested but no source kwargs are "
                 "available to rebuild a PrometheusSource"
             )
+        _validate_override_endpoint(override)
         return PrometheusSource(**{**self._source_kwargs, "endpoint": override})
 
     def is_ready(self) -> tuple[bool, str]:

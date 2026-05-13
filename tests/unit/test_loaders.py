@@ -187,6 +187,43 @@ def test_prometheus_loader_rejects_wrong_descriptor():
         loader(StaticDataSource(kind="static", name="x.csv"))
 
 
+def test_prometheus_loader_raises_clear_error_on_empty_response():
+    """The most common operator mistake is a PromQL that matches no series
+    over the requested window. Without this gate, the loader hands an
+    empty DataFrame to a model trainer and the user sees an opaque numpy
+    IndexError. Surface a clear error with the query text instead."""
+    from intelligence.api.schemas import PrometheusDataSource
+    from intelligence.tasks.loaders import PrometheusLoader
+
+    empty_df = pd.DataFrame(columns=["timestamp", "value"])
+    source = _FakeSource(empty_df)
+    loader = PrometheusLoader(source=source, query="nonsense_metric")
+
+    with pytest.raises(ValueError, match=r"no data.*nonsense_metric"):
+        loader(PrometheusDataSource(kind="prometheus", window="1h", step="1m"))
+
+
+def test_prometheus_loader_propagates_transport_errors():
+    """Network errors from the source (timeout, connection refused, 5xx)
+    must propagate so the service layer can map them to 502. The loader
+    shouldn't swallow or rewrap them."""
+    import requests
+
+    from intelligence.api.schemas import PrometheusDataSource
+    from intelligence.tasks.loaders import PrometheusLoader
+
+    class _FlakySource:
+        def fetch_range(self, *a, **kw):
+            raise requests.ConnectionError("connection refused")
+
+        def is_ready(self):
+            return False, "down"
+
+    loader = PrometheusLoader(source=_FlakySource(), query="up")
+    with pytest.raises(requests.ConnectionError):
+        loader(PrometheusDataSource(kind="prometheus", window="1h", step="1m"))
+
+
 @pytest.mark.parametrize(
     "spec,expected",
     [

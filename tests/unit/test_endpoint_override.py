@@ -130,6 +130,42 @@ def test_loader_uses_override_when_flag_on():
     assert captured_endpoints == ["https://other-prom.internal:9090"]
 
 
+@pytest.mark.parametrize(
+    "bad_url, reason",
+    [
+        ("http://other-prom.example:9090", "non-https scheme"),
+        ("https://localhost:9090", "literal loopback name"),
+        ("https://127.0.0.1:9090", "IPv4 loopback"),
+        ("https://169.254.169.254/api", "cloud metadata IP"),
+        ("https://10.0.0.5:9090", "RFC1918 private"),
+        ("https://172.16.0.10:9090", "RFC1918 private"),
+        ("https://192.168.1.50:9090", "RFC1918 private"),
+        ("https://[::1]:9090", "IPv6 loopback"),
+        ("https://[fc00::1]:9090", "IPv6 unique-local"),
+        ("https://[fe80::1]:9090", "IPv6 link-local"),
+    ],
+)
+def test_loader_rejects_ssrf_targets_even_when_flag_on(bad_url, reason):
+    """The override flag is meant for trusted clients but pilots will get
+    config wrong. Defense in depth: refuse anything that would let an
+    authenticated /train POST probe loopback / metadata / RFC1918 IPs."""
+    _maybe_field(PrometheusDataSource, "endpoint")
+    _maybe_field(TelemetryConfig, "allow_endpoint_override")
+    from intelligence.tasks.loaders import build_loader_for_task
+
+    cfg = IntelligenceConfig(
+        telemetry=TelemetryConfig(
+            source="prometheus",
+            prometheus=PrometheusConfig(endpoint="http://configured:9090"),
+            allow_endpoint_override=True,
+        ),
+    )
+    loader = build_loader_for_task(cfg, "cpu_forecast_arima", query="up")
+    desc = PrometheusDataSource(kind="prometheus", window="1h", step="1m", endpoint=bad_url)
+    with pytest.raises(ValueError, match=r"https|loopback|private|metadata|link-local"):
+        loader(desc)
+
+
 def test_loader_falls_back_to_configured_endpoint_when_no_override():
     """No override in the request: the loader uses the configured endpoint
     even when the flag is on."""

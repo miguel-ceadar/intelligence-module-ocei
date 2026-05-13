@@ -44,6 +44,7 @@ spec:
             - name: {{ $k }}
               value: {{ $v | quote }}
             {{- end }}
+            {{- if not .Values.existingSecretName }}
             {{- range $k, $_ := .Values.secretEnv }}
             - name: {{ $k }}
               valueFrom:
@@ -51,11 +52,15 @@ spec:
                   name: {{ include "intelligence.secretName" $ }}
                   key: {{ $k }}
             {{- end }}
-            {{- if .Values.existingSecretName }}
-            {{- /* For an existingSecret the chart can't know the keys; pilots
-                   must declare each they want to consume via extraEnv → valueFrom
-                   in a custom values.yaml. */}}
             {{- end }}
+          {{- if .Values.existingSecretName }}
+          envFrom:
+            # Every key in the referenced Secret becomes an env var with
+            # the same name. Use this with external-secrets / SealedSecrets
+            # so tokens never appear in values.yaml.
+            - secretRef:
+                name: {{ .Values.existingSecretName }}
+          {{- end }}
           volumeMounts:
             - name: config
               mountPath: /etc/intelligence
@@ -64,6 +69,10 @@ spec:
             - name: bentoml-store
               mountPath: /var/lib/bentoml
             {{- end }}
+          {{- with .Values.startupProbe }}
+          startupProbe:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
           livenessProbe:
             {{- toYaml .Values.livenessProbe | nindent 12 }}
           readinessProbe:

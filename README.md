@@ -263,9 +263,9 @@ A pulled Bento becomes available to a task only if its stored
 `input_spec` matches the task's spec (same `n_features`,
 `feature_names`, `steps_back`). Older Bentos that predate the contract
 are refused at predict time — the pull still works (the artifact lands
-in the local store), but `predict` won't serve from it. Override per
-task with `allow_unverified_models=True` when intentionally accepting
-the risk.
+in the local store), but `predict` won't serve from it. The verification
+is enforced; there's no YAML opt-out (the `allow_unverified_models`
+field on `BaseTask` is a debugging hook for forks, not pilot-facing).
 
 ## Extending
 

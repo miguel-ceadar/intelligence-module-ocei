@@ -15,6 +15,7 @@ Local dev and the smoke stack stay frictionless.
 
 from __future__ import annotations
 
+import hmac
 import os
 
 from fastapi.responses import JSONResponse
@@ -56,7 +57,9 @@ class BearerTokenMiddleware:
                 auth_header = value.decode("latin-1", errors="replace")
                 break
 
-        if auth_header.startswith("Bearer ") and auth_header[7:] == self.expected:
+        if auth_header.startswith("Bearer ") and hmac.compare_digest(
+            auth_header[7:], self.expected
+        ):
             await self.app(scope, receive, send)
             return
 
@@ -70,9 +73,12 @@ class BearerTokenMiddleware:
 
 def resolve_expected_token(token_env: str | None) -> str | None:
     """Read the expected token from the configured env var. ``None`` (or
-    an unset env var) disables auth — the middleware passes everything
-    through.
+    an unset/empty env var) disables auth — the middleware passes
+    everything through.
     """
     if not token_env:
         return None
-    return os.environ.get(token_env)
+    value = os.environ.get(token_env)
+    # Treat empty-string env values as "unset"; otherwise the middleware
+    # would compare against "" and accept any "Bearer " header.
+    return value or None

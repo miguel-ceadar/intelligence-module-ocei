@@ -26,7 +26,7 @@ from intelligence.api.schemas import (
 
 if TYPE_CHECKING:
     from intelligence.config.settings import BootstrapConfig, IntelligenceConfig
-    from intelligence.tasks.base import BaseTask, TaskRegistry
+    from intelligence.tasks.base import BaseTask
 
 logger = logging.getLogger(__name__)
 
@@ -89,22 +89,3 @@ async def bootstrap_task(task: BaseTask, cfg: IntelligenceConfig) -> None:
 
     task.bootstrap_state = "complete"
     logger.info("task %s: bootstrap complete", task.name)
-
-
-# Strong-reference set for in-flight bootstraps (see service.py for the rationale).
-_pending: set = set()
-
-
-async def bootstrap_all(reg: TaskRegistry, cfg: IntelligenceConfig) -> None:
-    """Fire-and-forget every task's bootstrap. Returns immediately;
-    each task's progress is tracked via its own ``bootstrap_state``.
-
-    Called from the FastAPI startup hook. We don't ``await`` the
-    individual tasks — startup must return promptly so the service
-    starts accepting health checks. ``/readyz`` is the gate.
-    """
-    for name in reg:
-        task = reg.get(name)
-        coro = asyncio.create_task(bootstrap_task(task, cfg))
-        _pending.add(coro)
-        coro.add_done_callback(_pending.discard)

@@ -15,9 +15,11 @@ defer model fetch to first use (see ``tests/integration/test_lazy_loading.py``).
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import os
 import time
+from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException
@@ -60,7 +62,44 @@ config = _load_app_config()
 registry = build_registry_from_config(config.intelligence)
 REGISTERED_TASKS.set(len(registry))
 
-app = FastAPI(title="ICOS Intelligence (O-CEI)", version=__version__)
+# Hold strong references to in-flight bootstrap tasks so the event-loop
+# garbage collector doesn't reap them mid-run (Python issue: asyncio
+# only weak-refs tasks). The done_callback removes each task once it
+# finishes, so the set stays bounded.
+_bootstrap_tasks: set = set()
+
+
+@asynccontextmanager
+async def lifespan(_app: FastAPI):
+    """Spawn bootstrap coroutines for every task whose config has
+    ``auto_train_on_startup: true``. State is flipped to ``running``
+    synchronously so ``/readyz`` returns 503 even before the event loop
+    ticks the coroutine.
+
+    Replaces the deprecated ``@app.on_event("startup")`` pattern. No
+    shutdown work — fire-and-forget bootstrap tasks are abandoned on
+    process exit by design.
+    """
+    from intelligence.tasks.bootstrap import bootstrap_task
+
+    for name in registry:
+        task = registry.get(name)
+        task_cfg = config.intelligence.tasks.get(name)
+        if task_cfg is None or not task_cfg.bootstrap.auto_train_on_startup:
+            continue
+        task.bootstrap_state = "running"
+        coro = asyncio.create_task(bootstrap_task(task, config.intelligence))
+        _bootstrap_tasks.add(coro)
+        coro.add_done_callback(_bootstrap_tasks.discard)
+
+    yield
+
+
+app = FastAPI(
+    title="ICOS Intelligence (O-CEI)",
+    version=__version__,
+    lifespan=lifespan,
+)
 # Order matters: ObservabilityMiddleware records every request including
 # 401s (which is useful — auth failures should be visible on /metrics).
 # Auth middleware therefore runs inside the observability one.
@@ -76,35 +115,6 @@ def metrics():
     """Prometheus-format metrics for scraping. Excluded from its own
     instrumentation to avoid self-amplifying counters."""
     return metrics_response()
-
-
-# Hold strong references to in-flight bootstrap tasks so the event-loop
-# garbage collector doesn't reap them mid-run (Python issue: asyncio
-# only weak-refs tasks). The done_callback removes each task once it
-# finishes, so the set stays bounded.
-_bootstrap_tasks: set = set()
-
-
-@app.on_event("startup")
-async def _bootstrap_tasks_on_startup() -> None:
-    """Spawn bootstrap coroutines for every task whose config has
-    ``auto_train_on_startup: true``. State is flipped to ``running``
-    synchronously so ``/readyz`` returns 503 even before the event loop
-    ticks the coroutine.
-    """
-    import asyncio
-
-    from intelligence.tasks.bootstrap import bootstrap_task
-
-    for name in registry:
-        task = registry.get(name)
-        task_cfg = config.intelligence.tasks.get(name)
-        if task_cfg is None or not task_cfg.bootstrap.auto_train_on_startup:
-            continue
-        task.bootstrap_state = "running"
-        coro = asyncio.create_task(bootstrap_task(task, config.intelligence))
-        _bootstrap_tasks.add(coro)
-        coro.add_done_callback(_bootstrap_tasks.discard)
 
 
 @app.get("/healthz")
@@ -236,6 +246,8 @@ def list_models() -> dict:
 
 @app.post("/tasks/{task_name}/train")
 def train(task_name: str, req: TrainRequest):
+    import requests
+
     if task_name not in registry:
         raise HTTPException(status_code=404, detail=f"unknown task: {task_name}")
     task = registry.get(task_name)
@@ -251,6 +263,14 @@ def train(task_name: str, req: TrainRequest):
     except (ValueError, TypeError) as e:
         TRAIN_TOTAL.labels(task=task_name, status="invalid").inc()
         raise HTTPException(status_code=422, detail=str(e)) from e
+    except requests.RequestException as e:
+        # Upstream Prometheus failure (5xx, timeout, connection refused).
+        # 502 distinguishes "my data source is broken" from "the model
+        # crashed" so dashboards can route the page correctly.
+        TRAIN_TOTAL.labels(task=task_name, status="upstream_error").inc()
+        raise HTTPException(
+            status_code=502, detail=f"upstream telemetry error: {type(e).__name__}: {e}"
+        ) from e
     except Exception:
         TRAIN_TOTAL.labels(task=task_name, status="error").inc()
         raise

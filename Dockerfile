@@ -7,7 +7,7 @@
 # Stage 2 (runtime): copies only the venv onto a clean python:3.11-slim base.
 # Result: no apt build tooling, no uv binary, no sources in the runtime image.
 
-FROM python:3.11-slim AS builder
+FROM python:3.11-slim-bookworm AS builder
 
 COPY --from=ghcr.io/astral-sh/uv:0.5.11 /uv /usr/local/bin/uv
 
@@ -48,8 +48,23 @@ COPY --from=builder /app/.venv /app/.venv
 ENV PATH="/app/.venv/bin:${PATH}" \
     BENTOML_HOME=/var/lib/bentoml \
     PYTHONUNBUFFERED=1
-RUN mkdir -p /var/lib/bentoml
+
+# Non-root runtime. UID 1000 matches the Helm chart's
+# podSecurityContext.runAsUser default, so both deployment paths run
+# with the same identity.
+RUN groupadd --system --gid 1000 app \
+ && useradd --system --uid 1000 --gid app --home-dir /app --shell /usr/sbin/nologin app \
+ && mkdir -p /var/lib/bentoml \
+ && chown -R app:app /var/lib/bentoml /app
+
+USER app
 
 EXPOSE 3000
+
+# Curl is already present (installed above for compose probes). Healthcheck
+# hits the cheap liveness endpoint so `docker run` users get container
+# health out of the box without needing to wire k8s probes.
+HEALTHCHECK --interval=30s --timeout=3s --start-period=10s --retries=3 \
+    CMD curl -fsS http://localhost:3000/healthz || exit 1
 
 CMD ["uvicorn", "intelligence.api.service:app", "--host", "0.0.0.0", "--port", "3000"]

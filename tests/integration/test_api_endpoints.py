@@ -164,3 +164,35 @@ def test_train_endpoint_prometheus_kind_unimplemented_in_phase_1(client):
     if resp.status_code == 404:
         pytest.skip("cpu_forecast_arima task not registered in this config")
     assert resp.status_code in (501, 422), resp.text
+
+
+def test_train_endpoint_maps_upstream_prometheus_failure_to_502(client):
+    """A flaky upstream Prometheus (5xx / timeout / connection refused)
+    raises ``requests.RequestException`` from inside the loader. The
+    service must surface that as 502, not a generic 500 — pilots need to
+    distinguish "my data source is down" from "the model crashed"."""
+    import requests
+
+    from intelligence.api import service as svc_mod
+    from intelligence.tasks.base import BaseTask
+
+    def _boom(_req):
+        raise requests.ConnectionError("connection refused")
+
+    fake = BaseTask(
+        name="_test_upstream_502",
+        model=None,
+        data_loader=lambda _ds: {},
+        bento_name="_test_upstream_502",
+    )
+    fake.train = _boom  # type: ignore[method-assign]
+    svc_mod.registry.register(fake)
+    try:
+        resp = client.post(
+            "/tasks/_test_upstream_502/train",
+            json={"data_source": {"kind": "static", "name": "any.csv"}},
+        )
+        assert resp.status_code == 502, resp.text
+        assert "upstream" in resp.json()["detail"].lower()
+    finally:
+        svc_mod.registry._tasks.pop("_test_upstream_502", None)
