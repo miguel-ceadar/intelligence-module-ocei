@@ -5,8 +5,9 @@ Forward plan for `icos-intelligence-ocei` after the pickle migration
 
 Ordering reflects two principles:
 
-1. **Dependency before flourish** — multivariate before per-variable
-   explainability, MLflow before backtesting artefacts, etc.
+1. **Dependency before flourish** — multivariate before transformer-era
+   models, GPU plumbing before training a transformer, MLflow before
+   the explainability artefacts that live in it.
 2. **Pilot impact early** — items that improve the deploy / first-forecast
    experience come before model breadth.
 
@@ -17,22 +18,22 @@ separate track.
 
 Cheap, doc-side changes.
 
-- **End-to-end "from zero to forecast" walkthrough.** Single tutorial
-  layered over `examples/`: deploy via Helm, point at a Prometheus,
-  define one task, train, predict. Not new code — new doc.
-- **More energy examples beyond Kepler.** IPMI/RAPL exporter,
-  PDU SNMP exporter, smart-plug exporter, DCIM-style metrics. Each is
-  one YAML file plus a short README paragraph.
-- **MLflow integration.** Log params, metrics and artefacts per `/train`
-  call. Unblocks Phase 5 (explainability artefacts need somewhere to
-  live; backtesting results too). answers
-  "why did this model do X?" without code spelunking.
-- **Default Grafana dashboard JSON.** Shipped in the Helm chart.
-  Predict latency, train durations, per-task error rate sourced from
-  the existing `/metrics` endpoint. Trivial, high perceived polish.
+- **End-to-end "from zero to forecast" walkthrough.** *Shipped 2026-05-13
+  as [`docs/getting-started.md`](docs/getting-started.md).* Linear path
+  from `helm install` to first `/predict`, anchored on the `cpu_forecast`
+  example.
+- **More energy examples beyond Kepler.** IPMI exporter, RAPL via
+  node-exporter, PDU SNMP exporter, smart-plug exporters, DCIM-style
+  metrics (Redfish). Each is one PromQL row in the
+  [`examples/energy_forecast/`](examples/energy_forecast/) recipe table —
+  no new bundled data, no library changes.
+- **Default Grafana dashboard JSON.** Shipped opt-in via the Helm chart
+  as a ConfigMap with the kube-prometheus-stack sidecar label
+  (`grafana_dashboard: "1"`). Panels source from the existing `/metrics`
+  endpoint: predict latency quantiles, train durations, per-task error
+  rate, registered-tasks gauge.
 
-
-## Phase 2 — Adjacent ingestion and minor models
+## Phase 2 — Adjacent ingestion
 
 Independent track.
 
@@ -40,60 +41,81 @@ Independent track.
   isolated, low risk. Extends `TelemetryConfig.source` and adds a
   `TelemetrySource` implementation alongside `static` and `prometheus`.
 
-  - Thanos connection?
+  - Thanos connection considered as a follow-up.
 
+## Phase 3 — Multivariate
 
-## Phase 3 — Zero-shot foundation model
-
-Biggest ease-of-use and modernness lever in the whole roadmap.
-
-- **`kind: chronos`** (Hugging Face Chronos 2 / Chronos-Bolt). Fits the
-  existing builder pattern; model pulled on demand; no `/train` call
-  required for inference. Changes the pitch from "train a model on
-  your data" to "point it at your metric and forecast." Especially
-  strong on bursty / regime-shifting signals — energy is one of the
-  clearest beneficiaries.
-- Optional follow-up: `kind: timesfm` once Chronos has settled.
-
-## Phase 4 — Multivariate
-
-Foundation that unlocks Phase 4 and Phase 5.
+Foundation that unlocks Phase 5.
 
 - Extend `feature` to accept a list of feature names.
 - Extend `InputSpec` and the contract verification (HF pull validator,
   predict-time `n_features` check, version-pinning verifier).
 - Extend XGB and LSTM trainers; refresh sliding-window logic.
 - Allow N PromQL queries per task in the YAML schema.
-- Update all four energy examples to demonstrate covariates
+- Update the energy examples to demonstrate covariates
   (energy ~ temperature + workload + hour-of-day).
 
 Blast-radius warning: this touches input contracts, version pinning,
 HF push/pull validation and every example. Own branch, contract tests
 as the gate.
 
-## Phase 5 — Transformers
+## Phase 4 — GPU mode
 
-Worth doing only after multivariate.
+Infrastructure prerequisite for Phase 5.
 
-- **TFT first.** Multivariate-native, attention weights provide
-  explainability for free, has native confidence intervals. Best ROI
-  of the modern architectures.
-- **PatchTST** as a lighter univariate alternative if TFT proves heavy
-  for pilot hardware.
+- **GPU as an extension.** PyTorch GPU device selection in the trainer,
+  optional `torch[cuda]` redirect, Dockerfile variant (or build arg) for
+  a CUDA base, Helm `resources.limits.nvidia.com/gpu` plumbing. Larger
+  image size but unlocks faster training and inference of complex models
+  (transformer training, Chronos inference). CPU path stays the default.
 
-## Phase 6 — Explainability and backtesting
+## Phase 5 — Modern models
 
-MLflow and multivariate are prerequisites; both exist by this phase.
+Lands as one coherent chapter behind multivariate and GPU.
 
-- **Explainability artefacts at train time:** SHAP for XGB, TFT
+- **`kind: chronos`** (Hugging Face Chronos 2 / Chronos-Bolt). Fits the
+  existing builder pattern; model pulled on demand; no `/train` call
+  required for inference. Changes the pitch from "train a model on
+  your data" to "point it at your metric and forecast." Especially
+  strong on bursty / regime-shifting signals — energy is one of the
+  clearest beneficiaries. Behind a `[chronos]` extra.
+- **`kind: tft`** (Temporal Fusion Transformer via
+  `pytorch-forecasting`). Multivariate-native, attention weights
+  provide explainability for free, native confidence intervals.
+  Best ROI of the bespoke transformer architectures. Behind a
+  `[transformers]` extra.
+- **`kind: patchtst`** as a lighter univariate alternative if TFT
+  proves heavy for pilot hardware.
+
+Optional follow-up: `kind: timesfm` once Chronos has settled.
+
+## Phase 6 — Tracking, explainability and backtesting
+
+- **MLflow integration.** Log params, metrics and tags per `/train`
+  call. Defensive import — MLflow stays disabled when `tracking_uri`
+  is unset. Restored as a `[mlflow]` optional extra. BentoML remains
+  the artefact store; MLflow holds the metadata. Prerequisite for the
+  rest of this phase.
+- **Explainability artefacts at train time.** SHAP for XGB, TFT
   attention / variable importance, ARIMA decomposition. Stored as
   MLflow artefacts plus a `/tasks/{task}/explain` endpoint.
 - **Walk-forward backtesting** as `/tasks/{task}/backtest`. Returns
   per-horizon error metrics. Pilots will ask "how good is this
   forecast?" — this is the answer.
 
-## Phase 7 - GPU support
-- **GPU as an extension** simple wiring for pytorch on gpu mode, larger image size but allows for faster training and inference of more complex models (Chronos inference + transformers-based models train/predict)
+## Phase 7 — Adjacencies, pilot-driven
+
+Only when a pilot actually asks for one of these:
+
+- **Drift-triggered auto-retrain loop.** Drift fires → train fires
+  automatically. Currently external (operator schedules via CronJob);
+  closing the loop couples the service more tightly.
+- **Other source types** (Kafka, cloud metric stores). Each is a new
+  `TelemetrySource` plus a `TelemetryConfig.source` literal extension
+  plus a branch in `build_loader_for_task`. At three sources, consider
+  extracting a source registry mirroring the kind dispatch.
+- **`kind: prophet`** as a low-priority addition; the Chronos
+  zero-shot pitch covers most of the same ground.
 
 ## Explicitly out of scope
 
