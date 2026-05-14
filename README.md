@@ -341,7 +341,7 @@ src/intelligence/            the library
 │   └── contracts/           per-task InputSpec
 ├── telemetry/               TelemetrySource Protocol + StaticSource + PrometheusSource
 ├── ml/
-│   ├── models/              Model protocol + ArimaModel / XgbModel / LstmModel
+│   ├── models/              Model protocol + ArimaModel / XgbModel / LstmModel / DriftModel
 │   └── trainers/            ModelTrainer + LSTM defs + metrics
 ├── config/                  typed config (pydantic-settings + YAML)
 └── data/samples/            bundled sample CSVs (ship with the wheel)

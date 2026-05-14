@@ -52,6 +52,21 @@ curl -X POST http://localhost:3000/tasks/cpu_forecast_arima/predict \
   -d '{"input_series": {"cpu": [0.42]}}'
 ```
 
+The drift task fits a reference distribution on the same window and
+returns a verdict — not a forecast — on a chunk of `chunk_size`
+observations (12 by default):
+
+```bash
+curl -X POST http://localhost:3000/tasks/cpu_forecast_arima_drift/train \
+  -H 'Content-Type: application/json' \
+  -d '{"data_source": {"kind": "prometheus", "window": "24h", "step": "1m"}}'
+
+curl -X POST http://localhost:3000/tasks/cpu_forecast_arima_drift/predict \
+  -H 'Content-Type: application/json' \
+  -d '{"input_series": {"cpu": [0.42, 0.44, 0.43, 0.45, 0.44, 0.43, 0.46, 0.45, 0.44, 0.43, 0.45, 0.44]}}'
+# {"prediction": {"drift_detected": false, "n_chunks": 1, "metric": "jensen_shannon", "forecaster": "cpu_forecast_arima"}, ...}
+```
+
 ## Try it in static mode (no Prometheus)
 
 The bundled `cpu_sample_dataset_orangepi.csv` carries a univariate CPU

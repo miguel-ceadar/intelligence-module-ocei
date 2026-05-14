@@ -164,7 +164,11 @@ Errors you might hit and what they mean:
 | `404` | `unknown task: ...` | The task name in the URL isn't registered — check `/tasks`. |
 | `422` | (validation message) | Request body doesn't match `TrainRequest` — e.g. wrong `data_source.kind`, missing `window` / `step`. |
 | `502` | `upstream telemetry error: ...` | Prometheus unreachable, refused the connection, or returned a 5xx. Test the endpoint from inside the cluster. |
-| `501` | drift not trainable | You hit `/train` on a `kind: drift` task — drift consumes its forecaster's output, no separate fit. |
+
+Drift tasks train the same way: hitting `/tasks/<drift_task>/train`
+fits a NannyML reference distribution on the configured chunk and
+returns `{"model_tag": ..., "metrics": {"reference_size": N}}`. See
+the drift snippet at the end of Step 4 for the predict shape.
 
 Two operational notes:
 
@@ -200,8 +204,7 @@ Response:
 
 `lower` / `upper` carry a 95 % confidence interval — ARIMA is one of
 the kinds that exposes one natively. Recursive XGB and direct-output
-LSTM leave both bounds `null`. `metric_type` is populated only for
-drift tasks; for forecasting tasks it's `null`.
+LSTM leave both bounds `null`.
 
 If the value you pass in `input_series.cpu` falls outside the task's
 `value_range`, predict returns `422` with a message like
@@ -229,6 +232,38 @@ Errors on `/predict`:
 | `404` | `unknown task: ...` | Task name in the URL isn't registered. |
 | `422` | (validation message) | Request body doesn't match `PredictRequest`, or InputSpec rejected the window — wrong feature names, wrong length, NaN/Inf, value outside `value_range`, or horizon above trained `max_horizon`. |
 | `503` | `no Bento ... in the local store; POST /tasks/.../train first` | No model trained yet (or the pinned version was deleted). |
+
+### Drift tasks
+
+A drift task is a regular task — same `/train` + `/predict` endpoints
+— that returns a *verdict* instead of a forecast. Predict expects a
+window of exactly `chunk_size` observations per feature; the response
+carries a dict in `prediction`:
+
+```bash
+curl -X POST http://localhost:3000/tasks/cpu_forecast_arima_drift/predict \
+  -H 'Content-Type: application/json' \
+  -d '{"input_series": {"cpu": [0.42, 0.44, 0.43, 0.45, 0.44, 0.43, 0.46, 0.45, 0.44, 0.43, 0.45, 0.44]}}'
+```
+
+```json
+{
+  "prediction": {
+    "drift_detected": false,
+    "n_chunks": 1,
+    "metric": "jensen_shannon",
+    "forecaster": "cpu_forecast_arima"
+  },
+  "metric_type": null,
+  "model_version": "<train-tag>"
+}
+```
+
+`forecaster` echoes the sibling forecast task this drift was paired
+with in YAML — useful for routing alerts. `metric` is whichever
+NannyML metric was configured on the task. `horizon` is accepted on
+the request for protocol symmetry but ignored — drift is a *now*
+verdict.
 
 ## Step 5 — Where to go next
 
