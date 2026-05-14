@@ -32,6 +32,11 @@ service:
 # -- The intelligence YAML config that gets mounted into the pod via a
 # ConfigMap. Mirror the shape of `examples/*/config.yaml`. Sensitive
 # fields (tokens) should NOT live here — use `secretEnv` instead.
+#
+# `tasks` ships empty: a chart-default forecast task would deep-merge
+# into the user's values file (helm merges maps, only lists replace)
+# and add a task they never asked for. Declare what you want to
+# forecast — see helm/intelligence/README.md and examples/*/config.yaml.
 config:
   intelligence:
     telemetry:
@@ -39,14 +44,7 @@ config:
       prometheus:
         endpoint: http://prometheus.monitoring.svc:9090
         # token_env: PROM_TOKEN   # uncomment + populate via secretEnv
-    tasks:
-      cpu_forecast_arima:
-        kind: arima
-        steps_back: 1
-        features:
-          - name: cpu
-            value_range: [0.0, 1.0]
-            query: 'avg(rate(node_cpu_seconds_total{mode!="idle"}[30s]))'
+    tasks: {}
 
 # -- Plain (non-secret) env-var overrides, applied on top of the config
 # above via pydantic-settings' INTELLIGENCE_<SECTION>__<FIELD> pattern.
@@ -124,8 +122,7 @@ serviceMonitor:
 retraining:
   enabled: false
   schedule: "0 */6 * * *"
-  tasks:
-    - cpu_forecast_arima
+  tasks: []           # the task names to POST /train against
   dataSource:
     kind: prometheus
     window: 24h

@@ -1,0 +1,15 @@
+# Overlay used in Step 8 of docs/energy-walkthrough.md. `helm upgrade -f`
+# this alongside values-walkthrough.yaml to add a third task (XGBoost)
+# without touching the existing two. The pod rolls because the chart
+# annotates the deployment with a checksum of the ConfigMap.
+
+config:
+  intelligence:
+    tasks:
+      energy_forecast_xgb:
+        kind: xgb
+        steps_back: 6
+        features:
+          - name: energy
+            value_range: [50.0, 300.0]
+            query: 'synthetic_energy_watts'

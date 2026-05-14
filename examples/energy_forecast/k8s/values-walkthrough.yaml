@@ -1,0 +1,67 @@
+# Helm values for the energy walkthrough (docs/energy-walkthrough.md).
+# Production-flavoured: pre-created Secret for bearer tokens, persistence
+# enabled, tasks declared explicitly. Two tasks ship — energy_forecast_arima
+# (forecast) and energy_forecast_arima_drift (drift verdict against the
+# same series). Step 7 of the walkthrough adds a third task via
+# `helm upgrade -f`.
+
+image:
+  repository: ghcr.io/miguel-ceadar/icos-intelligence-ocei
+  tag: "0.2.8"
+  pullPolicy: IfNotPresent
+
+config:
+  intelligence:
+    # Bearer-token gate on /train, /predict, /tasks. The env var name
+    # below must match a key in the Secret referenced by
+    # existingSecretName.
+    auth:
+      token_env: API_TOKEN
+    telemetry:
+      source: prometheus
+      prometheus:
+        # Defaults to the synthetic-stack.yaml Prometheus. Point at
+        # your own prom in production.
+        endpoint: http://prometheus.energy-forecast.svc:9090
+        # PROM_TOKEN is mounted from the Secret too, ready to use when
+        # your Prometheus actually enforces bearer auth (the synthetic
+        # one in this example does not — vanilla Prometheus has no
+        # built-in bearer support on its read endpoints).
+        token_env: PROM_TOKEN
+    tasks:
+      energy_forecast_arima:
+        kind: arima
+        steps_back: 1
+        features:
+          - name: energy
+            # Watts envelope. Synthetic exporter emits ~100–200 W; a
+            # request outside this range gets a 422 (Step 7 in the doc).
+            value_range: [50.0, 300.0]
+            query: 'synthetic_energy_watts'
+
+      energy_forecast_arima_drift:
+        kind: drift
+        forecaster: energy_forecast_arima
+        chunk_size: 24
+        features:
+          - name: energy
+            value_range: [50.0, 300.0]
+            query: 'synthetic_energy_watts'
+
+# Pre-created Secret pattern (production). The walkthrough's Step 3
+# creates `intelligence-secrets` in the same namespace with API_TOKEN
+# and PROM_TOKEN keys. Every key in that Secret is mounted as an env
+# var of the same name on the pod.
+existingSecretName: intelligence-secrets
+
+persistence:
+  enabled: true
+  size: 5Gi
+
+resources:
+  requests:
+    cpu: 200m
+    memory: 1Gi
+  limits:
+    cpu: 1500m
+    memory: 2Gi
