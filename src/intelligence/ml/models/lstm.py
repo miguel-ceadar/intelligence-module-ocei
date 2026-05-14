@@ -26,11 +26,15 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
-import numpy as np
 import pandas as pd
 from sklearn.preprocessing import MinMaxScaler
 
 from intelligence.api.schemas import ForecastPoint
+from intelligence.ml.models._common import (
+    assemble_predict_window,
+    coerce_metrics,
+    supervised_window,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -65,7 +69,7 @@ class LstmModel:
         components_with_params = {**components, "model_parameters": params}
         trainer = ModelTrainer(components_with_params)
         metrics, network, _step_epoch, _step_loss = trainer.train_pytorch()
-        metrics_jsonable = _coerce_jsonable_nested(metrics)
+        metrics_jsonable = coerce_metrics(metrics)
 
         artifacts = {
             "network": network,
@@ -182,37 +186,17 @@ class LstmModel:
         """
         import torch
 
-        if not input_series:
-            raise ValueError("input_series is empty")
-
-        look_back = int(artifacts["look_back"])
-        num_variables = int(artifacts["num_variables"])
         trained_horizon = int(artifacts.get("horizon", artifacts.get("output_size", 1)))
-
         if horizon > trained_horizon:
             raise ValueError(
                 f"horizon {horizon} exceeds trained output_size={trained_horizon}; "
                 f"retrain with a larger output window or request a shorter horizon"
             )
 
-        # Stack the input series in declared order, take the last ``look_back``
-        # observations across all variables → shape (look_back, num_variables).
-        # Spec validation (above) already guaranteed every expected feature
-        # is present and the window is long enough.
-        spec = artifacts.get("input_spec")
-        if spec is not None:
-            series_keys = list(spec.feature_names)
-        else:
-            series_keys = list(input_series.keys())[:num_variables]
-        if len(series_keys) < num_variables:
-            raise ValueError(f"need {num_variables} input series, got {len(series_keys)}")
-        window = np.column_stack(
-            [np.asarray(input_series[k], dtype=float)[-look_back:] for k in series_keys]
-        )
-        if window.shape[0] < look_back:
-            raise ValueError(
-                f"need at least {look_back} observations per series, got {window.shape[0]}"
-            )
+        # ``assemble_predict_window`` handles the empty / short-window /
+        # missing-feature failure modes and stacks the canonical
+        # ``(look_back, num_variables)`` window LSTM scales below.
+        window, _ = assemble_predict_window(artifacts, input_series)
 
         input_scaler = artifacts["scaler_X"]
         target_scaler = artifacts["scaler_obj"]
@@ -284,8 +268,8 @@ def make_lstm_prepare(
         scaled_train = scaler_X.transform(train_df)
         scaled_test = scaler_X.transform(test_df)
 
-        sup_train = _ts_supervised_structure(scaled_train, n_in=look_back, n_out=horizon)
-        sup_test = _ts_supervised_structure(scaled_test, n_in=look_back, n_out=horizon)
+        sup_train = supervised_window(scaled_train, n_in=look_back, n_out=horizon)
+        sup_test = supervised_window(scaled_test, n_in=look_back, n_out=horizon)
 
         # Supervised columns are ordered (lag, var). The future section
         # (last horizon * num_variables cols) interleaves var1, var2, …
@@ -339,33 +323,3 @@ def make_lstm_prepare(
     return prepare
 
 
-def _ts_supervised_structure(data: np.ndarray, n_in: int, n_out: int = 1) -> np.ndarray:
-    """Numpy version of supervised-structure reshape — operates on the
-    already-scaled 2-D array and returns a 2-D supervised array of
-    width ``(n_in + n_out) * n_vars`` after dropping NaN rows.
-    """
-    if data.ndim == 1:
-        data = data.reshape(-1, 1)
-    n_rows, n_vars = data.shape
-    window = n_in + n_out
-    if n_rows < window:
-        raise ValueError(
-            f"need at least {window} rows for n_in={n_in}, n_out={n_out}; got {n_rows}"
-        )
-    out = np.empty((n_rows - window + 1, window * n_vars), dtype=float)
-    for i in range(out.shape[0]):
-        out[i] = data[i : i + window].reshape(-1)
-    return out
-
-
-def _coerce_jsonable_nested(metrics: dict) -> dict:
-    """LSTM ``train_pytorch`` returns ``{metric_0: {...}, metric_1: {...}}``.
-    Flatten ``.item()`` calls one level deep.
-    """
-    out: dict = {}
-    for k, v in metrics.items():
-        if isinstance(v, dict):
-            out[k] = {kk: vv.item() if hasattr(vv, "item") else vv for kk, vv in v.items()}
-        else:
-            out[k] = v.item() if hasattr(v, "item") else v
-    return out

@@ -15,6 +15,7 @@ from typing import Any
 import numpy as np
 
 from intelligence.api.schemas import ForecastPoint
+from intelligence.ml.models._common import coerce_metrics
 
 logger = logging.getLogger(__name__)
 
@@ -44,7 +45,7 @@ class ArimaModel:
 
         trainer = ModelTrainer(components_with_params)
         metrics, _model, history, _y_test, _y_pred = trainer.train_arima()
-        metrics_jsonable = _coerce_jsonable(metrics)
+        metrics_jsonable = coerce_metrics(metrics)
 
         artifacts = {
             "scaler_obj": components_with_params["scaler_obj"],
@@ -132,6 +133,11 @@ class ArimaModel:
         if not values:
             raise ValueError("input_series values are empty")
 
+        # ``scaler_obj`` is the y-scaler in every model. ARIMA is the
+        # only one that also uses it to *scale the input* below —
+        # that's safe because ARIMA is univariate, so the input series
+        # *is* the target. Adding covariates would require a separate
+        # input scaler (cf. XGB's ``scaler_X``).
         scaler = artifacts["scaler_obj"]
         history = list(artifacts.get("historical_data", []))
         order = tuple(
@@ -171,8 +177,3 @@ class ArimaModel:
         ]
 
 
-def _coerce_jsonable(metrics: dict) -> dict:
-    out = {}
-    for k, v in metrics.items():
-        out[k] = v.item() if hasattr(v, "item") else v
-    return out

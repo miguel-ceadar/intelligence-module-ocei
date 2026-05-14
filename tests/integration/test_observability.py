@@ -64,20 +64,41 @@ def test_healthz_is_skipped_too(client):
 
 
 def test_dynamic_paths_normalize_to_route_pattern(client):
-    """A POST to /tasks/does_not_exist/predict should record against
-    /tasks/{task}/predict, not against the literal path. Keeps label
-    cardinality bounded."""
+    """A POST to /tasks/does_not_exist/predict should record against the
+    matched route template (``/tasks/{task_name}/predict``), not the
+    literal path. Keeps label cardinality bounded."""
     from intelligence.api.observability import HTTP_REQUESTS
 
     # Use a path that's guaranteed to 404 (no task registered in this test config).
     client.post("/tasks/no_such_task/predict", json={"input_series": {"x": [0.1]}})
-    # The "{task}" template should have at least one sample now.
+    # The route-template label should have at least one sample now.
     value = HTTP_REQUESTS.labels(
-        route="/tasks/{task}/predict",
+        route="/tasks/{task_name}/predict",
         method="POST",
         status="404",
     )._value.get()
     assert value >= 1
+
+
+def test_delete_versions_path_normalizes_to_route_pattern(client):
+    """``DELETE /tasks/{task}/versions/{version}`` was missing from the
+    hand-maintained regex list — every version string used to become its
+    own label value, exploding cardinality. The fix is to read the matched
+    route off ``scope`` instead of pattern-matching paths.
+    """
+    from intelligence.api.observability import HTTP_REQUESTS
+
+    # Use unique versions per call — if route normalisation is broken,
+    # each call would land on its own raw-path label and the templated
+    # bucket would stay at zero.
+    client.delete("/tasks/no_such_task/versions/abc123")
+    client.delete("/tasks/no_such_task/versions/def456")
+    value = HTTP_REQUESTS.labels(
+        route="/tasks/{task_name}/versions/{version}",
+        method="DELETE",
+        status="404",
+    )._value.get()
+    assert value >= 2
 
 
 def test_request_id_filter_injects_id_onto_log_records():

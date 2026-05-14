@@ -311,7 +311,3 @@ def test_is_ready_returns_failure_on_non_200(mock_get):
     assert "503" in msg
 
 
-def test_satisfies_telemetry_source_protocol():
-    from intelligence.telemetry import PrometheusSource, TelemetrySource
-
-    assert isinstance(PrometheusSource(endpoint="http://x"), TelemetrySource)

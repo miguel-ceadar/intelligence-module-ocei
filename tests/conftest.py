@@ -44,11 +44,6 @@ def repo_root() -> Path:
 
 
 @pytest.fixture(scope="session")
-def src_root(repo_root: Path) -> Path:
-    return repo_root / "src" / "intelligence"
-
-
-@pytest.fixture(scope="session")
 def samples_dir(repo_root: Path) -> Path:
     return repo_root / "src" / "intelligence" / "data" / "samples"
 

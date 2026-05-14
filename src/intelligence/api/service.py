@@ -42,7 +42,9 @@ from intelligence.api.schemas import (
     ModelSyncRequest,
     ModelSyncResponse,
     PredictRequest,
+    PredictResponse,
     TrainRequest,
+    TrainResponse,
 )
 from intelligence.config import load_config
 from intelligence.ml.artifact import list_artifacts_by_name
@@ -288,7 +290,7 @@ def list_models() -> dict:
     }
 
 
-@app.post("/tasks/{task_name}/train")
+@app.post("/tasks/{task_name}/train", response_model=TrainResponse)
 def train(task_name: str, req: TrainRequest):
     import requests
 
@@ -320,10 +322,10 @@ def train(task_name: str, req: TrainRequest):
         raise
     TRAIN_TOTAL.labels(task=task_name, status="ok").inc()
     TRAIN_DURATION.labels(task=task_name).observe(time.monotonic() - start)
-    return result.model_dump()
+    return result
 
 
-@app.post("/models/sync")
+@app.post("/models/sync", response_model=ModelSyncResponse)
 def sync_model(req: ModelSyncRequest):
     """Push a local model to Hugging Face or pull one into the local store.
 
@@ -376,10 +378,10 @@ def sync_model(req: ModelSyncRequest):
             status_code=502,
             detail=f"upstream HF transport error: {type(e).__name__}: {e}",
         ) from e
-    return ModelSyncResponse(action=req.action, model_tag=tag, repo_id=repo_id).model_dump()
+    return ModelSyncResponse(action=req.action, model_tag=tag, repo_id=repo_id)
 
 
-@app.post("/tasks/{task_name}/predict")
+@app.post("/tasks/{task_name}/predict", response_model=PredictResponse)
 def predict(task_name: str, req: PredictRequest):
     if task_name not in registry:
         raise HTTPException(status_code=404, detail=f"unknown task: {task_name}")
@@ -398,7 +400,7 @@ def predict(task_name: str, req: PredictRequest):
         raise
     PREDICT_TOTAL.labels(task=task_name, status="ok").inc()
     PREDICT_DURATION.labels(task=task_name).observe(time.monotonic() - start)
-    return result.model_dump()
+    return result
 
 
 # Expose the FastAPI app as a BentoML Service so ``bentoml serve``

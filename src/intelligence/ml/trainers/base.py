@@ -111,23 +111,6 @@ class ModelTrainer:
             logger.info("Epoch [%d/%d], Train Loss: %.4f", epoch + 1, num_epochs, avg)
         return model, step_epoch, step_loss
 
-    def _eval_lstm(self, model, val_loader, criterion, num_epochs, device):
-        step_epoch: list[int] = []
-        step_loss: list[float] = []
-        for epoch in range(num_epochs):
-            model.eval()
-            eval_loss = 0.0
-            for X_batch, y_batch in val_loader:
-                X_batch, y_batch = X_batch.to(device), y_batch.to(device)
-                outputs = model(X_batch)
-                loss = criterion(outputs, y_batch)
-                eval_loss += loss.item()
-            avg = eval_loss / len(val_loader)
-            step_epoch.append(epoch + 1)
-            step_loss.append(avg)
-            logger.info("Epoch [%d/%d], Eval Loss: %.4f", epoch + 1, num_epochs, avg)
-        return model, step_epoch, step_loss
-
     def _kd_regression(
         self,
         teacher,
@@ -236,7 +219,6 @@ class ModelTrainer:
         model, step_epoch_train, step_loss_train = self._train_lstm(
             model, train_loader, criterion, optimizer, num_epochs, device_t
         )
-        model, _, _ = self._eval_lstm(model, val_loader, criterion, num_epochs, device_t)
 
         if distill:
             model, *_ = self._distilled_process(

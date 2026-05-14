@@ -89,7 +89,7 @@ def test_drift_predict_on_similar_chunk_reports_no_drift(tmp_path, monkeypatch):
     # Same distribution as reference — should not alert.
     similar_chunk = _stationary_cpu(12, mean=0.5, std=0.05, seed=2)
     resp = task.predict(PredictRequest(input_series={"cpu": similar_chunk["cpu"].tolist()}))
-    assert resp.prediction["drift_detected"] is False
+    assert resp.prediction.drift_detected is False
 
 
 def test_drift_predict_on_shifted_chunk_reports_drift(tmp_path, monkeypatch):
@@ -106,7 +106,7 @@ def test_drift_predict_on_shifted_chunk_reports_drift(tmp_path, monkeypatch):
     # Strongly shifted distribution (mean 0.5 -> 0.9, much tighter std).
     shifted_chunk = _stationary_cpu(12, mean=0.9, std=0.02, seed=3)
     resp = task.predict(PredictRequest(input_series={"cpu": shifted_chunk["cpu"].tolist()}))
-    assert resp.prediction["drift_detected"] is True
+    assert resp.prediction.drift_detected is True
 
 
 def test_drift_multivariate_alerts_on_any_feature_drift(tmp_path, monkeypatch):
@@ -156,7 +156,7 @@ def test_drift_multivariate_alerts_on_any_feature_drift(tmp_path, monkeypatch):
         "mem": rng2.normal(0.95, 0.01, 12).clip(0.0, 1.0).tolist(),
     }
     resp = task.predict(PredictRequest(input_series=chunk))
-    assert resp.prediction["drift_detected"] is True
+    assert resp.prediction.drift_detected is True
 
 
 def test_drift_task_is_registered_via_builder(tmp_path, monkeypatch):

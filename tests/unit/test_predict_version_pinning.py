@@ -27,10 +27,12 @@ def _isolated_bento_home(tmp_path, monkeypatch):
 
 
 def _make_model():
+    from intelligence.api.schemas import ForecastPoint
+
     m = mock.MagicMock()
     m.name = "fake"
     m.has_drift = False
-    m.predict.return_value = 0.5
+    m.predict.return_value = [ForecastPoint(value=0.5)]
     m.load_artifacts.return_value = {}
     return m
 

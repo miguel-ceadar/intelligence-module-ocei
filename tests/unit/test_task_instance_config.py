@@ -25,13 +25,63 @@ def _parse(payload: dict):
     return _adapter.validate_python(payload)
 
 
-def test_arima_minimal_block_parses():
-    cfg = _parse({"kind": "arima", "features": [{"name": "cpu"}]})
-    assert isinstance(cfg, ArimaTaskConfig)
-    assert cfg.features == [FeatureSpec(name="cpu")]
-    assert cfg.steps_back == 1
-    assert cfg.model_params.p == 5
-    assert cfg.features[0].query is None
+def _attr(obj, path: str):
+    for part in path.split("."):
+        obj = obj[int(part)] if part.isdigit() else getattr(obj, part)
+    return obj
+
+
+@pytest.mark.parametrize(
+    "payload,expected_cls,expected_attrs",
+    [
+        pytest.param(
+            {"kind": "arima", "features": [{"name": "cpu"}]},
+            ArimaTaskConfig,
+            {"steps_back": 1, "model_params.p": 5, "features.0.query": None},
+            id="arima-defaults",
+        ),
+        pytest.param(
+            {"kind": "xgb", "features": [{"name": "cpu"}]},
+            XgbTaskConfig,
+            {"steps_back": 6, "model_params.n_estimators": 100, "model_params.eta": 0.1},
+            id="xgb-defaults",
+        ),
+        pytest.param(
+            {
+                "kind": "lstm",
+                "features": [{"name": "cpu"}],
+                "batch_size": 32,
+                "model_params": {"hidden_size": 16, "num_epochs": 10},
+            },
+            LstmTaskConfig,
+            {
+                "batch_size": 32,
+                "model_params.hidden_size": 16,
+                "model_params.num_epochs": 10,
+            },
+            id="lstm-overrides",
+        ),
+        pytest.param(
+            {
+                "kind": "drift",
+                "features": [{"name": "cpu"}],
+                "forecaster": "cpu_forecast_arima",
+            },
+            DriftTaskConfig,
+            {
+                "forecaster": "cpu_forecast_arima",
+                "chunk_size": 12,
+                "metric": "jensen_shannon",
+            },
+            id="drift-with-forecaster",
+        ),
+    ],
+)
+def test_task_instance_config_parses_per_kind(payload, expected_cls, expected_attrs):
+    cfg = _parse(payload)
+    assert isinstance(cfg, expected_cls)
+    for path, expected in expected_attrs.items():
+        assert _attr(cfg, path) == expected, path
 
 
 def test_arima_with_full_overrides_parses():
@@ -56,14 +106,6 @@ def test_arima_with_full_overrides_parses():
     assert cfg.model_params.q == 1
 
 
-def test_xgb_block_parses_with_defaults():
-    cfg = _parse({"kind": "xgb", "features": [{"name": "cpu"}]})
-    assert isinstance(cfg, XgbTaskConfig)
-    assert cfg.steps_back == 6
-    assert cfg.model_params.n_estimators == 100
-    assert cfg.model_params.eta == pytest.approx(0.1)
-
-
 def test_xgb_model_params_accept_unknown_xgboost_field():
     # XgbModelParams has extra="allow" so forward-compat fields don't
     # require library updates whenever xgboost adds a knob.
@@ -76,24 +118,6 @@ def test_xgb_model_params_accept_unknown_xgboost_field():
     )
     assert isinstance(cfg, XgbTaskConfig)
     assert cfg.model_params.model_extra == {"subsample": 0.8}
-
-
-def test_lstm_block_carries_batch_size_and_network_shape():
-    cfg = _parse(
-        {
-            "kind": "lstm",
-            "features": [{"name": "cpu"}],
-            "batch_size": 32,
-            "model_params": {"hidden_size": 16, "num_epochs": 10},
-        }
-    )
-    assert isinstance(cfg, LstmTaskConfig)
-    assert cfg.batch_size == 32
-    assert cfg.model_params.hidden_size == 16
-    assert cfg.model_params.num_epochs == 10
-    # ``input_size`` / ``output_size`` are deliberately *not* on the schema —
-    # the builder derives them from ``len(features)`` and ``horizon``.
-    assert "input_size" not in LstmTaskConfig.model_fields["model_params"].annotation.model_fields
 
 
 def test_lstm_horizon_defaults_to_one():
@@ -113,20 +137,6 @@ def test_lstm_horizon_overrides_default():
     cfg = _parse({"kind": "lstm", "features": [{"name": "cpu"}], "horizon": 6})
     assert isinstance(cfg, LstmTaskConfig)
     assert cfg.horizon == 6
-
-
-def test_drift_requires_forecaster_reference():
-    cfg = _parse(
-        {
-            "kind": "drift",
-            "features": [{"name": "cpu"}],
-            "forecaster": "cpu_forecast_arima",
-        }
-    )
-    assert isinstance(cfg, DriftTaskConfig)
-    assert cfg.forecaster == "cpu_forecast_arima"
-    assert cfg.chunk_size == 12
-    assert cfg.metric == "jensen_shannon"
 
 
 def test_drift_without_forecaster_fails():

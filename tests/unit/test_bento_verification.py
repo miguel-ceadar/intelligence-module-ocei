@@ -39,10 +39,12 @@ def _spec(n_features: int = 1, steps_back: int = 1, feature_names=("cpu",)) -> I
 
 
 def _model(loaded: dict):
+    from intelligence.api.schemas import ForecastPoint
+
     m = mock.MagicMock()
     m.name = "fake"
     m.has_drift = False
-    m.predict.return_value = 0.42
+    m.predict.return_value = [ForecastPoint(value=0.42)]
     m.load_artifacts.return_value = loaded
     return m
 
@@ -81,7 +83,7 @@ def test_predict_succeeds_when_artefact_spec_matches():
         get.return_value = _fake_saved()
         result = task.predict(PredictRequest(input_series={"cpu": [0.5]}))
 
-    assert result.prediction == 0.42
+    assert result.prediction[0].value == 0.42
 
 
 def test_predict_refuses_artefact_without_input_spec_by_default():
@@ -140,7 +142,7 @@ def test_override_lets_missing_spec_through():
     with mock.patch("intelligence.tasks.base.get_artifact_by_tag") as get:
         get.return_value = _fake_saved()
         result = task.predict(PredictRequest(input_series={"cpu": [0.5]}))
-    assert result.prediction == 0.42
+    assert result.prediction[0].value == 0.42
 
 
 def test_override_lets_mismatched_spec_through():
@@ -152,7 +154,7 @@ def test_override_lets_mismatched_spec_through():
     with mock.patch("intelligence.tasks.base.get_artifact_by_tag") as get:
         get.return_value = _fake_saved()
         result = task.predict(PredictRequest(input_series={"cpu": [0.5]}))
-    assert result.prediction == 0.42
+    assert result.prediction[0].value == 0.42
 
 
 def test_task_without_input_spec_skips_verification():
@@ -164,4 +166,4 @@ def test_task_without_input_spec_skips_verification():
     with mock.patch("intelligence.tasks.base.get_artifact_by_tag") as get:
         get.return_value = _fake_saved()
         result = task.predict(PredictRequest(input_series={"cpu": [0.5]}))
-    assert result.prediction == 0.42
+    assert result.prediction[0].value == 0.42

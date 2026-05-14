@@ -28,11 +28,17 @@ from intelligence.ml.artifact.manifest import Manifest
 from intelligence.tasks import BaseTask
 
 
-def _make_model(predict_return: float = 0.42, loaded_return: dict | None = None):
+def _make_model(predict_return=None, loaded_return: dict | None = None):
+    from intelligence.api.schemas import ForecastPoint
+
     m = mock.MagicMock()
     m.name = "fake"
     m.has_drift = False
-    m.predict.return_value = predict_return
+    # PredictResponse.prediction is ``list[ForecastPoint] | DriftPrediction`` —
+    # mocks that returned a bare float used to slip through ``prediction: Any``.
+    m.predict.return_value = (
+        predict_return if predict_return is not None else [ForecastPoint(value=0.42)]
+    )
     m.fit.return_value = ({"any": "thing"}, {"mae": 0.1})
     m.save_artifacts.return_value = {"thing": "thing.json"}
     m.load_artifacts.return_value = loaded_return if loaded_return is not None else {}

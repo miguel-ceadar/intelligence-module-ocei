@@ -6,6 +6,8 @@ from typing import Annotated, Any, Literal
 
 from pydantic import BaseModel, Field
 
+from intelligence.config.settings import DriftMetric
+
 
 class StaticDataSource(BaseModel):
     """Static data source: read a CSV from the configured samples directory."""
@@ -79,11 +81,25 @@ class PredictRequest(BaseModel):
     model_version: str | None = None
 
 
+class DriftPrediction(BaseModel):
+    """Drift task response payload. Mirrors the dict
+    ``DriftModel.predict`` returns; declared as a model here so
+    ``PredictResponse`` advertises a real shape instead of ``Any``.
+    """
+
+    drift_detected: bool
+    n_chunks: int
+    metric: DriftMetric
+    forecaster: str
+
+
 class PredictResponse(BaseModel):
-    # ``Any`` rather than ``list[ForecastPoint]`` because drift tasks
-    # keep a dict-shaped prediction. Forecast tasks return
-    # ``list[ForecastPoint]`` of length ``request.horizon``.
-    prediction: Any
+    # Forecast tasks return ``list[ForecastPoint]`` of length
+    # ``request.horizon``; drift tasks return ``DriftPrediction``. The
+    # untagged union resolves structurally (list vs object), so the
+    # caller doesn't need to know which kind of task served the
+    # request — pydantic coerces from the runtime dict either way.
+    prediction: list[ForecastPoint] | DriftPrediction
     metric_type: int | None = None
     # The concrete version that actually served this request — useful for
     # logging, A/B analysis, and verifying a rollback took effect.

@@ -21,10 +21,25 @@ import pandas as pd
 from sklearn.preprocessing import StandardScaler
 
 from intelligence.api.schemas import ForecastPoint
+from intelligence.ml.models._common import (
+    assemble_predict_window,
+    coerce_metrics,
+    supervised_window,
+    supervised_window_columns,
+)
 
 logger = logging.getLogger(__name__)
 
 _TIMESTAMP_COLS = {"time", "timestamp", "date"}
+
+
+def _ensure_estimator_type(reg) -> None:
+    """xgboost 1.7.6 expects ``_estimator_type`` on the regressor during
+    save and load, but sklearn 1.8 dropped it from ``RegressorMixin``.
+    Set it explicitly — harmless on older sklearn.
+    """
+    if not hasattr(reg, "_estimator_type"):
+        reg._estimator_type = "regressor"
 
 
 class XgbModel:
@@ -54,7 +69,7 @@ class XgbModel:
 
         trainer = ModelTrainer(components_with_params)
         metrics, regressor = trainer.train_xgb()
-        metrics_jsonable = _coerce_jsonable(metrics)
+        metrics_jsonable = coerce_metrics(metrics)
 
         artifacts = {
             "regressor": regressor,
@@ -80,11 +95,7 @@ class XgbModel:
         )
 
         regressor = artifacts["regressor"]
-        # xgboost 1.7.6 expects ``_estimator_type`` during save, but
-        # sklearn 1.8 dropped it from ``RegressorMixin``. Set it
-        # explicitly — harmless on older sklearn.
-        if not hasattr(regressor, "_estimator_type"):
-            regressor._estimator_type = "regressor"
+        _ensure_estimator_type(regressor)
         regressor.save_model(str(dest / "xgb.ubj"))
 
         save_sklearn_scaler(dest, "scaler_x", artifacts["scaler_X"])
@@ -128,9 +139,7 @@ class XgbModel:
         )
 
         regressor = XGBRegressor()
-        # Same xgboost-1.7.6 / sklearn-1.8 quirk as ``save_artifacts``.
-        if not hasattr(regressor, "_estimator_type"):
-            regressor._estimator_type = "regressor"
+        _ensure_estimator_type(regressor)
         regressor.load_model(str(src / "xgb.ubj"))
 
         meta = load_json(src, "xgb_meta.json")
@@ -158,36 +167,13 @@ class XgbModel:
         held at their last observed value across the horizon (we don't
         have future ground truth). No native confidence intervals —
         ``lower``/``upper`` stay ``None``.
+
+        The supervised training structure orders columns by ``(lag,
+        var)`` — the window returned by ``assemble_predict_window`` has
+        the same shape, so a row-major flatten produces the model's
+        expected input vector.
         """
-        if not input_series:
-            raise ValueError("input_series is empty")
-
-        look_back = int(artifacts["look_back"])
-        num_variables = int(artifacts.get("num_variables", 1))
-
-        # Canonical feature order comes from the saved InputSpec when
-        # present (predict-time validation has already aligned the
-        # request to it). Fall back to ``input_series`` insertion order
-        # for legacy artifacts that pre-date input_spec.
-        spec = artifacts.get("input_spec")
-        if spec is not None:
-            series_keys = list(spec.feature_names)
-        else:
-            series_keys = list(input_series.keys())[:num_variables]
-        if len(series_keys) < num_variables:
-            raise ValueError(f"need {num_variables} input series, got {len(series_keys)}")
-
-        # Stack into a (look_back, num_variables) window. The supervised
-        # training structure orders columns by (lag, var) — same shape
-        # we want here so a row-major flatten produces the model's
-        # expected input vector.
-        window_2d = np.column_stack(
-            [np.asarray(input_series[k], dtype=float)[-look_back:] for k in series_keys]
-        )
-        if window_2d.shape[0] < look_back:
-            raise ValueError(
-                f"need at least {look_back} observations per series, got {window_2d.shape[0]}"
-            )
+        window_2d, num_variables = assemble_predict_window(artifacts, input_series)
 
         scaler_x = artifacts["scaler_X"]
         scaler_y = artifacts["scaler_obj"]
@@ -257,8 +243,19 @@ def make_xgb_prepare(
         split = int(len(data) * 0.8)
         train_df, test_df = data.iloc[:split], data.iloc[split:]
 
-        sup_train = _ts_supervised_structure(train_df, n_in=look_back, n_out=1)
-        sup_test = _ts_supervised_structure(test_df, n_in=look_back, n_out=1)
+        # ``supervised_window`` is the numpy core shared with LSTM.
+        # XGB needs the ``var{j}(t-{i})`` column names so the fitted
+        # scaler's ``feature_names_in_`` round-trips at predict time —
+        # wrap the ndarray back into a DataFrame with the canonical names.
+        col_names = supervised_window_columns(n_in=look_back, n_out=1, n_vars=num_variables)
+        sup_train = pd.DataFrame(
+            supervised_window(train_df.to_numpy(), n_in=look_back, n_out=1),
+            columns=col_names,
+        )
+        sup_test = pd.DataFrame(
+            supervised_window(test_df.to_numpy(), n_in=look_back, n_out=1),
+            columns=col_names,
+        )
 
         x_train = sup_train.iloc[:, :-num_variables]
         y_train = sup_train.iloc[:, -num_variables].squeeze()
@@ -286,30 +283,3 @@ def make_xgb_prepare(
     return prepare
 
 
-def _ts_supervised_structure(data: pd.DataFrame, n_in: int, n_out: int = 1) -> pd.DataFrame:
-    """Lag-feature reshape: build columns ``var1(t-n_in)`` ... ``var1(t)``
-    for autoregressive supervised learning.
-
-    Keeps a column-name convention (``var{j}(t-{i})``) so saved
-    ``StandardScaler``s carry the right ``feature_names_in_`` and can
-    transform predict-time windows without name mismatch errors.
-    """
-    n_vars = data.shape[1]
-    cols: list[pd.DataFrame] = []
-    names: list[str] = []
-    for i in range(n_in, 0, -1):
-        cols.append(data.shift(i))
-        names += [f"var{j + 1}(t-{i})" for j in range(n_vars)]
-    for i in range(n_out):
-        cols.append(data.shift(-i))
-        if i == 0:
-            names += [f"var{j + 1}(t)" for j in range(n_vars)]
-        else:
-            names += [f"var{j + 1}(t+{i})" for j in range(n_vars)]
-    out = pd.concat(cols, axis=1)
-    out.columns = names
-    return out.dropna()
-
-
-def _coerce_jsonable(metrics: dict) -> dict:
-    return {k: v.item() if hasattr(v, "item") else v for k, v in metrics.items()}

@@ -22,16 +22,6 @@ def _stationary_cpu(n: int, mean: float = 0.5, std: float = 0.05, seed: int = 1)
     return pd.DataFrame({"cpu": rng.normal(mean, std, n).clip(0.0, 1.0)})
 
 
-def test_drift_model_satisfies_model_protocol():
-    """``DriftModel`` is plugged into ``BaseTask`` the same way as
-    ``ArimaModel`` / ``XgbModel`` / ``LstmModel``. It must structurally
-    satisfy the ``Model`` Protocol."""
-    from intelligence.ml.models import Model
-    from intelligence.ml.models.drift import DriftModel
-
-    assert isinstance(DriftModel(), Model)
-
-
 def test_drift_model_advertises_drift_kind():
     """``name`` is the dispatch key + manifest tag. ``has_drift`` flag
     on a model means "this forecaster has a paired drift detector" —

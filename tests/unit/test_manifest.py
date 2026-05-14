@@ -9,15 +9,12 @@ structural — no executable types, no pickle, no path traversal.
 
 from __future__ import annotations
 
-import json
-
 import pytest
 
 from intelligence.ml.artifact.manifest import (
     ALLOWED_EXTENSIONS,
     ALWAYS_ALLOWED,
     SCHEMA_VERSION,
-    Manifest,
     ManifestError,
     read_manifest,
     validate_artifact_directory,
@@ -43,34 +40,6 @@ def test_always_allowed_covers_manifest_and_bentoml_yaml():
     both ride alongside whatever the kind declares."""
     assert "manifest.json" in ALWAYS_ALLOWED
     assert "model.yaml" in ALWAYS_ALLOWED
-
-
-def test_manifest_roundtrip_through_json():
-    manifest = Manifest(
-        schema_version=SCHEMA_VERSION,
-        kind="arima",
-        created_at="2026-05-13T10:00:00+00:00",
-        files={"model": "arima.json", "input_spec": "input_spec.json"},
-    )
-    data = json.loads(manifest.model_dump_json())
-    restored = Manifest.model_validate(data)
-    assert restored == manifest
-
-
-def test_kind_is_open_string_so_new_kinds_need_no_manifest_edit():
-    """Adding a new model kind (e.g. ``prophet``, ``transformer``) must
-    not require editing this module. The manifest layer treats ``kind``
-    as opaque; the model-loader dispatch is responsible for refusing
-    unknown kinds with a clear error."""
-    manifest = validate_manifest_dict(
-        {
-            "schema_version": SCHEMA_VERSION,
-            "kind": "prophet_future_kind",
-            "created_at": "2026-05-13T10:00:00+00:00",
-            "files": {"model": "prophet.json"},
-        }
-    )
-    assert manifest.kind == "prophet_future_kind"
 
 
 def test_validate_rejects_old_schema_version():

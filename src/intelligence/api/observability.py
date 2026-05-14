@@ -20,7 +20,6 @@ from __future__ import annotations
 
 import json
 import logging
-import re
 import time
 import uuid
 from contextvars import ContextVar
@@ -91,21 +90,22 @@ REGISTERED_TASKS = Gauge(
 # the /metrics scrape would self-amplify.
 _SKIP_INSTRUMENTATION: set[str] = {"/healthz", "/readyz", "/metrics"}
 
-# Route-normalising regexes — keep label cardinality independent of the
-# number of tasks (which is config-bounded but still better not exploded).
-_DYNAMIC_SEGMENTS = [
-    (re.compile(r"^/tasks/[^/]+/train$"), "/tasks/{task}/train"),
-    (re.compile(r"^/tasks/[^/]+/predict$"), "/tasks/{task}/predict"),
-    (re.compile(r"^/tasks/[^/]+/versions$"), "/tasks/{task}/versions"),
-    (re.compile(r"^/models/[^/]+$"), "/models/{tag}"),
-]
 
+def _matched_route(scope: dict, fallback: str) -> str:
+    """Return the templated route path for label use.
 
-def _normalise_route(path: str) -> str:
-    for pattern, replacement in _DYNAMIC_SEGMENTS:
-        if pattern.match(path):
-            return replacement
-    return path
+    FastAPI's router sets ``scope["route"]`` to the matched
+    ``starlette.routing.Route`` once the inner app has dispatched.
+    The route's ``.path`` is the template (e.g.
+    ``/tasks/{task_name}/predict``) — exactly what we want as a
+    bounded-cardinality label.
+
+    Falls back to the raw request path when no route matched (404 on
+    an unknown path). Those cases still appear in metrics under the
+    raw path, but their cardinality is bounded by what clients probe.
+    """
+    route = scope.get("route")
+    return getattr(route, "path", fallback)
 
 
 # Request ID context ------------------------------------------------------
@@ -227,7 +227,6 @@ class ObservabilityMiddleware:
         req_id = uuid.uuid4().hex[:8]
         token = _request_id.set(req_id)
         method: str = scope.get("method", "GET")
-        route = _normalise_route(path)
         start = time.monotonic()
         # Mutable holder so the wrapper closure can write back the status.
         status_holder = {"code": 500}
@@ -241,6 +240,9 @@ class ObservabilityMiddleware:
             await self.app(scope, receive, send_wrapper)
         except Exception:
             duration = time.monotonic() - start
+            # Route may still have been matched before the handler raised;
+            # fall back to the raw path otherwise.
+            route = _matched_route(scope, path)
             HTTP_REQUESTS.labels(route=route, method=method, status="500").inc()
             HTTP_DURATION.labels(route=route, method=method).observe(duration)
             logger.exception(
@@ -257,6 +259,7 @@ class ObservabilityMiddleware:
         else:
             duration = time.monotonic() - start
             status = status_holder["code"]
+            route = _matched_route(scope, path)
             HTTP_REQUESTS.labels(route=route, method=method, status=str(status)).inc()
             HTTP_DURATION.labels(route=route, method=method).observe(duration)
             logger.info(

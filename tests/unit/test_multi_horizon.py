@@ -92,6 +92,73 @@ def test_predict_response_carries_list_of_forecast_points():
     assert payload["prediction"][1]["upper"] == pytest.approx(0.5)
 
 
+# --- DriftPrediction + PredictResponse union --------------------------------
+#
+# §5 maintainability: PredictResponse.prediction used to be ``Any`` so the
+# real forecast-vs-drift shape divergence stayed hidden from OpenAPI and
+# from any consumer relying on the response model. The honest schema is
+# ``list[ForecastPoint] | DriftPrediction``; an untagged union works because
+# a list and an object are structurally disjoint.
+
+
+def test_drift_prediction_schema_matches_runtime_dict():
+    """``DriftModel.predict`` returns a dict with these four keys. The
+    schema has to match the runtime contract so untagged-union coercion
+    works without the caller having to instantiate the model itself.
+    """
+    DriftPrediction = _maybe(api_schemas, "DriftPrediction")
+    pred = DriftPrediction(
+        drift_detected=True,
+        n_chunks=3,
+        metric="jensen_shannon",
+        forecaster="cpu_forecast_arima",
+    )
+    assert pred.drift_detected is True
+    assert pred.n_chunks == 3
+
+
+def test_predict_response_coerces_drift_dict_into_drift_prediction():
+    """``BaseTask.predict`` builds ``PredictResponse(prediction=<drift dict>)``
+    — pydantic must coerce the dict to ``DriftPrediction`` via the union.
+    """
+    DriftPrediction = _maybe(api_schemas, "DriftPrediction")
+    resp = api_schemas.PredictResponse(
+        prediction={
+            "drift_detected": False,
+            "n_chunks": 1,
+            "metric": "jensen_shannon",
+            "forecaster": "cpu_forecast_arima",
+        },
+        model_version="abc",
+    )
+    assert isinstance(resp.prediction, DriftPrediction)
+    assert resp.prediction.drift_detected is False
+
+
+def test_predict_response_rejects_unrelated_dict():
+    """An object that's neither a list nor a drift shape should fail —
+    the old ``Any`` schema accepted anything."""
+    if "DriftPrediction" not in dir(api_schemas):
+        pytest.skip("DriftPrediction not implemented yet")
+    with pytest.raises(ValidationError):
+        api_schemas.PredictResponse(prediction={"unrelated": "data"}, model_version="x")
+
+
+def test_openapi_advertises_real_response_models():
+    """``response_model=`` on the FastAPI handlers should surface
+    ``PredictResponse`` and ``TrainResponse`` in the OpenAPI schema —
+    consumers can generate clients against the real types instead of
+    inferring shapes by trial-and-error."""
+    api_service = pytest.importorskip("intelligence.api.service")
+    schema = api_service.app.openapi()
+    predict = schema["paths"]["/tasks/{task_name}/predict"]["post"]
+    train = schema["paths"]["/tasks/{task_name}/train"]["post"]
+    predict_ref = predict["responses"]["200"]["content"]["application/json"]["schema"]["$ref"]
+    train_ref = train["responses"]["200"]["content"]["application/json"]["schema"]["$ref"]
+    assert predict_ref.endswith("/PredictResponse")
+    assert train_ref.endswith("/TrainResponse")
+
+
 # --- InputSpec.max_horizon --------------------------------------------------
 
 

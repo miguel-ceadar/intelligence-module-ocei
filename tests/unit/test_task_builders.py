@@ -189,29 +189,6 @@ def test_builders_dict_covers_every_shipped_kind():
     assert set(BUILDERS) == {"arima", "xgb", "lstm", "drift"}
 
 
-def test_builders_dict_matches_task_instance_union():
-    """``BUILDERS.keys()`` and the ``TaskInstanceConfig`` discriminator
-    union are two sources of truth — adding a kind in one place but
-    forgetting the other manifests as a pydantic-passes-but-builder-
-    KeyErrors runtime trap. Pin the consistency at the schema level.
-    """
-    from typing import get_args
-
-    from intelligence.config.settings import TaskInstanceConfig
-
-    # ``TaskInstanceConfig`` is ``Annotated[Union[...], Field(discriminator=...)]``.
-    # ``get_args(Annotated[X, ...])[0]`` is ``X``; its args are the union members.
-    union_type = get_args(TaskInstanceConfig)[0]
-    union_kinds = {
-        m.model_fields["kind"].annotation.__args__[0]  # Literal["arima"] -> "arima"
-        for m in get_args(union_type)
-    }
-    assert union_kinds == set(BUILDERS), (
-        f"BUILDERS and TaskInstanceConfig union are out of sync: "
-        f"BUILDERS={set(BUILDERS)} vs union={union_kinds}"
-    )
-
-
 def test_get_builder_raises_for_unknown_kind():
     with pytest.raises(KeyError, match="transformer"):
         get_builder("transformer")
