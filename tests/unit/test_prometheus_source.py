@@ -127,6 +127,14 @@ def test_bearer_token_from_file_is_forwarded(mock_get, tmp_path):
     assert kwargs["headers"]["Authorization"] == "Bearer fromfile"
 
 
+def test_token_file_missing_fails_at_construction(tmp_path):
+    from intelligence.telemetry import PrometheusSource
+
+    missing = tmp_path / "does-not-exist"
+    with pytest.raises(FileNotFoundError, match="does not exist"):
+        PrometheusSource(endpoint="http://prom:9090", token_file=str(missing))
+
+
 @patch("intelligence.telemetry.prometheus.requests.get")
 def test_tls_skip_verify_is_forwarded(mock_get):
     from intelligence.telemetry import PrometheusSource

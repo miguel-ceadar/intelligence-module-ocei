@@ -86,8 +86,13 @@ e2e-stress: up-demo
 # stack (up-dev). Only the orchestration targets care which compose
 # files are in play; that's what the `-dev` variants here are for.
 
+# Build is its own step so output is visible — `--build --wait` from
+# `up` can swallow build output behind the wait spinner. `--force-recreate`
+# guarantees the container is replaced even when compose's image-hash
+# check decides the existing container is still valid.
 up-dev:
-	$(COMPOSE_DEV) up -d --build --wait
+	$(COMPOSE_DEV) build intelligence
+	$(COMPOSE_DEV) up -d --force-recreate --wait
 
 down-dev:
 	$(COMPOSE_DEV) down -v

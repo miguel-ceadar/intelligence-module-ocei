@@ -53,11 +53,19 @@ config:
 extraEnv: {}
   # INTELLIGENCE_TELEMETRY__PROMETHEUS__ENDPOINT: https://prom.example.com
 
-# -- Sensitive env vars. Reference an existing Secret in the cluster
-# (existingSecretName) or let the chart create one from secretEnv.
-# Keys become env var names in the pod.
+# -- Sensitive env vars. Recommended pattern: pre-create a Secret in
+# the cluster (via sealed-secrets, external-secrets, Vault, etc.) and
+# reference it here with `existingSecretName`. The chart wires it into
+# the pod via `envFrom: secretRef`.
+#
+# `secretEnv` is provided for demos and local kind/minikube clusters
+# only — values are written into a chart-managed Secret as `stringData`,
+# which means they pass through your shell history, Helm release state,
+# and any GitOps tooling that renders values.yaml. Do not use in
+# production. The chart refuses to render if both are set.
 existingSecretName: ""
 secretEnv: {}
+  # demo only — production should use existingSecretName
   # PROM_TOKEN: ""          # referenced from config.intelligence.telemetry.prometheus.token_env
   # HF_TOKEN: ""            # for /models/sync push/pull
 

@@ -245,3 +245,25 @@ def test_lstm_builder_propagates_num_variables_to_prepare(prom_cfg):
     assert task.input_spec.n_features == 3
     assert task.input_spec.feature_names == ["cpu", "memory", "load"]
     assert task.data_loader.value_cols == ["cpu", "memory", "load"]
+
+
+def test_lstm_builder_sets_input_size_to_feature_count(prom_cfg):
+    """The trained network's ``input_size`` must equal ``len(features)``
+    or PyTorch raises ``input.size(-1) must be equal to input_size``
+    on the first batch. The builder overrides whatever default the
+    task's ``model_params`` carries — input_size is a function of the
+    feature count, not a tunable.
+    """
+    task_cfg = LstmTaskConfig(
+        kind="lstm",
+        features=[
+            FeatureSpec(name="cpu", query="avg(node_cpu_util)"),
+            FeatureSpec(name="memory", query="avg(node_mem_util)"),
+        ],
+        steps_back=6,
+        # Operator deliberately set the wrong input_size; the builder
+        # must overwrite it.
+        model_params={"input_size": 1, "hidden_size": 4, "num_epochs": 2},
+    )
+    task = build_lstm_task("cpu_mem_lstm", task_cfg, prom_cfg)
+    assert task.model.default_params["input_size"] == 2

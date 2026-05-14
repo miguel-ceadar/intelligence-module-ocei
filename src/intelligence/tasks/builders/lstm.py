@@ -21,9 +21,16 @@ def build_lstm_task(
     # deployments don't pay the cost on registry build.
     from intelligence.ml.models.lstm import LstmModel, make_lstm_prepare
 
-    # ``task_cfg.horizon`` drives both the trained network's output_size
-    # and the request-time max_horizon clamp.
-    model_params = {**task_cfg.model_params.model_dump(), "output_size": task_cfg.horizon}
+    # The network's I/O shape is dictated by the task config, not by
+    # whatever default ``model_params`` carries: ``input_size`` is the
+    # feature count (one channel per feature in the input tensor) and
+    # ``output_size`` is the horizon (target-only multivariate output).
+    # ``task_cfg.horizon`` also drives the request-time max_horizon clamp.
+    model_params = {
+        **task_cfg.model_params.model_dump(),
+        "input_size": len(task_cfg.features),
+        "output_size": task_cfg.horizon,
+    }
 
     return BaseTask(
         name=name,

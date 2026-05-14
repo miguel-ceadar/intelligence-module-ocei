@@ -40,8 +40,10 @@ config:
             value_range: [0.0, 1.0]
             query: 'avg(rate(node_cpu_seconds_total{mode!="idle"}[30s]))'
 
-secretEnv:
-  PROM_TOKEN: "your-bearer-token"
+# Recommended: reference a pre-created Secret (sealed-secrets,
+# external-secrets, Vault, etc.) so tokens never enter values.yaml or
+# helm release state. `secretEnv` below is for demos only.
+existingSecretName: "intelligence-secrets"
 
 persistence:
   enabled: true
@@ -60,7 +62,8 @@ overrides:
 | `image.repository` / `image.tag` | which image to pull |
 | `config.intelligence.tasks.*` | which tasks to register and how |
 | `config.intelligence.telemetry.prometheus.endpoint` | where to scrape from |
-| `secretEnv.PROM_TOKEN` / `secretEnv.HF_TOKEN` | bearer tokens (rendered into a Secret) |
+| `existingSecretName` | name of a pre-created Secret holding `PROM_TOKEN` / `HF_TOKEN` (production path) |
+| `secretEnv.PROM_TOKEN` / `secretEnv.HF_TOKEN` | inline bearer tokens, rendered into a chart-managed Secret (**demo only** — values pass through helm state) |
 | `persistence.enabled` / `size` | local BentoML model store volume |
 | `serviceMonitor.enabled` | wire `/metrics` to Prometheus Operator |
 | `retraining.enabled` / `retraining.schedule` | CronJob hitting `/tasks/*/train` |

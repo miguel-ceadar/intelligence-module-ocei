@@ -75,6 +75,33 @@ jobs:
             type=semver,pattern={{major}}.{{minor}}
             type=raw,value=latest,enable=${{ startsWith(github.ref, 'refs/tags/v') }}
 
+      # Build amd64 locally first so Trivy can scan before any push.
+      # The multi-arch push step reuses this gha cache layer, so arm64
+      # is the only extra work and it runs after the scan passes.
+      # arm64 isn't separately scanned — base packages are the same and
+      # adding qemu+load for it would double build time for a vanishing
+      # delta. The release tag never reaches GHCR if amd64 has HIGH/CRITICAL.
+      - name: Build amd64 image for scanning (load to local daemon)
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile
+          platforms: linux/amd64
+          load: true
+          tags: ${{ env.IMAGE_NAME }}:scan
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Scan image for HIGH/CRITICAL CVEs (Trivy)
+        uses: aquasecurity/trivy-action@v0.36.0
+        with:
+          image-ref: ${{ env.IMAGE_NAME }}:scan
+          format: table
+          exit-code: "1"
+          ignore-unfixed: true
+          severity: HIGH,CRITICAL
+          vuln-type: os,library
+
       - name: Build and push (multi-arch)
         id: build
         uses: docker/build-push-action@v6
@@ -92,20 +119,6 @@ jobs:
           # via `docker buildx imagetools inspect --format ... <tag>`.
           sbom: true
           provenance: true
-
-      - name: Scan pushed image for HIGH/CRITICAL CVEs (Trivy)
-        # Runs after push so the SBOM-attested image is in the registry
-        # by the time the scan reports. The job fails on findings — the
-        # tag is published but the release status is red, so pilots see
-        # the failure on the GitHub release page.
-        uses: aquasecurity/trivy-action@v0.36.0
-        with:
-          image-ref: ghcr.io/${{ steps.owner.outputs.value }}/${{ env.IMAGE_NAME }}@${{ steps.build.outputs.digest }}
-          format: table
-          exit-code: "1"
-          ignore-unfixed: true
-          severity: HIGH,CRITICAL
-          vuln-type: os,library
 
   publish-chart:
     runs-on: ubuntu-latest

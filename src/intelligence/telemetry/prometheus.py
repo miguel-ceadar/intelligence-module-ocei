@@ -7,6 +7,8 @@ Thanos Query — same endpoints.
 Auth: pass a token via ``token_env`` (env var name) or ``token_file``
 (filesystem path). The token is read at call time, not at construction,
 so rotating the secret doesn't require recreating the source.
+``token_file`` is checked for existence at construction so a typo'd
+path fails the service at startup, not at first request.
 
 TLS: ``tls_skip_verify=True`` disables certificate validation. Only use
 inside a trusted cluster.
@@ -35,6 +37,10 @@ class PrometheusSource:
     ) -> None:
         if token_env and token_file:
             raise ValueError("specify token_env or token_file, not both")
+        if token_file and not Path(token_file).is_file():
+            raise FileNotFoundError(
+                f"prometheus token_file {token_file!r} does not exist or is not a regular file"
+            )
         self.endpoint = endpoint.rstrip("/")
         self.token_env = token_env
         self.token_file = token_file
@@ -48,7 +54,12 @@ class PrometheusSource:
         if self.token_env:
             token = os.environ.get(self.token_env)
         elif self.token_file:
-            token = Path(self.token_file).read_text().strip()
+            try:
+                token = Path(self.token_file).read_text().strip()
+            except OSError as e:
+                raise RuntimeError(
+                    f"failed to read prometheus token_file {self.token_file!r}: {e}"
+                ) from e
         return {"Authorization": f"Bearer {token}"} if token else {}
 
     def _request(self, path: str, params: dict | None = None, *, timeout: float | None = None):

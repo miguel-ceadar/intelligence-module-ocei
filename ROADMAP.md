@@ -36,7 +36,7 @@ of the shared `/api/v1/query_range` and `/api/v1/query` paths.
 Future tutorials will demonstrate the long-history case by pointing
 at a Thanos endpoint.
 
-## Phase 3 — Multivariate
+## Phase 3 — Multivariate DONE
 
 Foundation that unlocks Phase 5.
 
@@ -48,9 +48,6 @@ Foundation that unlocks Phase 5.
 - Update the energy examples to demonstrate covariates
   (energy ~ temperature + workload + hour-of-day).
 
-Blast-radius warning: this touches input contracts, version pinning,
-HF push/pull validation and every example. Own branch, contract tests
-as the gate.
 
 ## Phase 4 — GPU mode
 
@@ -64,7 +61,6 @@ Infrastructure prerequisite for Phase 5.
 
 ## Phase 5 — Modern models
 
-Lands as one coherent chapter behind multivariate and GPU.
 
 - **`kind: chronos`** (Hugging Face Chronos 2 / Chronos-Bolt). Fits the
   existing builder pattern; model pulled on demand; no `/train` call

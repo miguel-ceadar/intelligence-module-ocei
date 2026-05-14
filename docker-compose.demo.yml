@@ -19,6 +19,10 @@
 services:
   intelligence:
     image: ghcr.io/miguel-ceadar/icos-intelligence-ocei:${INTELLIGENCE_TAG:-latest}
+    # "3000:3000" binds to 0.0.0.0:3000 — fine on a workstation, but if
+    # you run the demo on a public host either firewall the port or
+    # change to "127.0.0.1:3000:3000". /metrics, /docs, and probes are
+    # unauthenticated by design.
     ports:
       - "3000:3000"
     environment:

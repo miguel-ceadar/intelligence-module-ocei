@@ -98,10 +98,13 @@ app = FastAPI(
 )
 # Observability runs outside auth so 401s show up on /metrics.
 app.add_middleware(ObservabilityMiddleware)
-app.add_middleware(
-    BearerTokenMiddleware,
-    expected_token=resolve_expected_token(config.intelligence.auth.token_env),
-)
+_expected_token = resolve_expected_token(config.intelligence.auth.token_env)
+app.add_middleware(BearerTokenMiddleware, expected_token=_expected_token)
+if _expected_token is None:
+    # Surfaces a common misconfiguration: chart deployed without
+    # `intelligence.auth.token_env`, or with the env var unset, leaves
+    # every endpoint open. Probes and /metrics stay open regardless.
+    logger.warning("HTTP auth disabled — set intelligence.auth.token_env to require Bearer tokens")
 
 
 @app.get("/metrics")
