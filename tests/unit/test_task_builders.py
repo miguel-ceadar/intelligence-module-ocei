@@ -155,7 +155,15 @@ def test_xgb_builder_leaves_max_horizon_unbounded(static_cfg):
     assert task.input_spec.max_horizon is None
 
 
-def test_drift_builder_produces_drift_detection_task(prom_cfg):
+def test_drift_builder_produces_basetask_with_drift_model(prom_cfg):
+    """A drift task is a plain ``BaseTask`` wired with a ``DriftModel``;
+    drift-specific config lives on the wrapped model. ``chunk_size``
+    doubles as ``steps_back`` on the InputSpec so the contract layer
+    enforces exact-length analysis windows.
+    """
+    from intelligence.ml.models.drift import DriftModel
+    from intelligence.tasks.base import BaseTask
+
     task_cfg = DriftTaskConfig(
         kind="drift",
         features=[
@@ -169,9 +177,10 @@ def test_drift_builder_produces_drift_detection_task(prom_cfg):
         chunk_size=12,
     )
     task = build_drift_task("cpu_forecast_arima_drift", task_cfg, prom_cfg)
-    assert task.__class__.__name__ == "DriftDetectionTask"
-    assert task.forecaster_task_name == "cpu_forecast_arima"
-    assert task.chunk_size == 12
+    assert isinstance(task, BaseTask)
+    assert isinstance(task.model, DriftModel)
+    assert task.model.forecaster_task_name == "cpu_forecast_arima"
+    assert task.model.chunk_size == 12
     assert task.input_spec.feature_names == ["cpu"]
     assert task.input_spec.steps_back == 12  # drift's steps_back == chunk_size
 
