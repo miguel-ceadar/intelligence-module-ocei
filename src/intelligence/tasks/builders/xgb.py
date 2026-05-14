@@ -22,16 +22,17 @@ def build_xgb_task(
 
     # ``model_dump()`` preserves both the named defaults and any
     # extra=allow fields (forward-compat with newer xgboost knobs).
+    feature_names = [f.name for f in task_cfg.features]
     return BaseTask(
         name=name,
         model=XgbModel(**task_cfg.model_params.model_dump()),
         data_loader=build_loader_for_task(
             intelligence_cfg,
             name,
-            value_cols=[f.name for f in task_cfg.features],
+            value_cols=feature_names,
             prepare=make_xgb_prepare(
                 look_back=task_cfg.steps_back,
-                num_variables=len(task_cfg.features),
+                feature_names=feature_names,
             ),
             queries=[f.query for f in task_cfg.features],
         ),

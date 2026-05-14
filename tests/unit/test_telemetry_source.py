@@ -53,3 +53,37 @@ def test_static_source_is_ready_reports_missing_dir(tmp_path):
     ok, msg = src.is_ready()
     assert ok is False
     assert "missing" in msg
+
+
+def test_static_source_sorts_by_timestamp_when_column_present(tmp_path):
+    """Out-of-order rows in a CSV silently break downstream row-position
+    splits (train/test, sliding windows). The source must return rows
+    sorted ascending by any standard timestamp column so the prepare
+    contract — "rows are in chronological order" — holds upstream.
+    """
+    p = tmp_path / "shuffled.csv"
+    p.write_text(
+        "time,value\n2024-01-03,3\n2024-01-01,1\n2024-01-05,5\n2024-01-02,2\n2024-01-04,4\n"
+    )
+    df = StaticSource(base_dir=tmp_path).fetch_range("shuffled.csv")
+    assert df["value"].tolist() == [1, 2, 3, 4, 5]
+    assert list(df.index) == [0, 1, 2, 3, 4], "index must be reset after sort"
+
+
+def test_static_source_sort_recognises_case_variants(tmp_path):
+    """Timestamp column detection is case-insensitive across the standard
+    names so a CSV with ``Timestamp`` or ``DATE`` headers still sorts.
+    """
+    p = tmp_path / "cased.csv"
+    p.write_text("Timestamp,value\n2024-01-02,2\n2024-01-01,1\n")
+    df = StaticSource(base_dir=tmp_path).fetch_range("cased.csv")
+    assert df["value"].tolist() == [1, 2]
+
+
+def test_static_source_leaves_order_alone_when_no_timestamp_column(tmp_path):
+    """Without a recognised timestamp column the source has no basis for
+    sorting; row order is preserved as-is."""
+    p = tmp_path / "no_ts.csv"
+    p.write_text("a,b\n3,30\n1,10\n2,20\n")
+    df = StaticSource(base_dir=tmp_path).fetch_range("no_ts.csv")
+    assert df["a"].tolist() == [3, 1, 2]

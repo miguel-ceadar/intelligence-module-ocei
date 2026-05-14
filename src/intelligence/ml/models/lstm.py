@@ -34,6 +34,8 @@ from intelligence.api.schemas import ForecastPoint
 
 logger = logging.getLogger(__name__)
 
+_TIMESTAMP_COLS = {"time", "timestamp", "date"}
+
 
 class LstmModel:
     """PyTorch LSTM forecaster. Defaults are per-instance, so tasks
@@ -232,17 +234,21 @@ class LstmModel:
 
 def make_lstm_prepare(
     look_back: int = 6,
-    num_variables: int = 1,
+    feature_names: list[str] | None = None,
     batch_size: int = 64,
     horizon: int = 1,
 ) -> Callable[[pd.DataFrame], dict]:
     """Build a ``prepare`` callable that produces LSTM-shaped components
     (3-D X tensors + ``TimeSeriesDataset`` instances).
 
-    Multivariate: the first column is the target; remaining columns are
-    exogenous covariates. The supervised structure emits a
-    ``(samples, horizon)`` y-tensor — target only across the horizon —
-    paired with ``model_parameters["output_size"] = horizon``.
+    ``feature_names`` is the canonical feature order — target first,
+    covariates after. Columns are looked up in the DataFrame by name,
+    not by position. ``None`` is single-target legacy mode that picks
+    the first non-timestamp column.
+
+    The supervised structure emits a ``(samples, horizon)`` y-tensor —
+    target only across the horizon — paired with
+    ``model_parameters["output_size"] = horizon``.
 
     Two scalers are fit:
       - ``scaler_X``: multivariate MinMax fit on all input columns,
@@ -257,13 +263,17 @@ def make_lstm_prepare(
 
         from intelligence.ml.trainers.base import TimeSeriesDataset
 
-        cols = [c for c in df.columns if c.lower() not in {"time", "timestamp", "date"}][
-            :num_variables
-        ]
-        if len(cols) < num_variables:
-            raise ValueError(
-                f"expected {num_variables} numeric column(s), found {len(cols)}: {cols}"
-            )
+        if feature_names is None:
+            cols = [next(c for c in df.columns if c.lower() not in _TIMESTAMP_COLS)]
+        else:
+            missing = [n for n in feature_names if n not in df.columns]
+            if missing:
+                raise ValueError(
+                    f"make_lstm_prepare expected columns {list(feature_names)!r}, "
+                    f"missing {missing!r}; DataFrame has {list(df.columns)!r}"
+                )
+            cols = list(feature_names)
+        num_variables = len(cols)
         data = df[cols].astype(float).reset_index(drop=True)
 
         split = int(len(data) * 0.8)

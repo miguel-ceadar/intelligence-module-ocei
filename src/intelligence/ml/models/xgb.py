@@ -24,6 +24,8 @@ from intelligence.api.schemas import ForecastPoint
 
 logger = logging.getLogger(__name__)
 
+_TIMESTAMP_COLS = {"time", "timestamp", "date"}
+
 
 class XgbModel:
     """XGBoost regressor. Defaults are per-instance so different tasks
@@ -219,24 +221,37 @@ class XgbModel:
 
 def make_xgb_prepare(
     look_back: int = 6,
-    num_variables: int = 1,
+    feature_names: list[str] | None = None,
 ) -> Callable[[pd.DataFrame], dict]:
     """Build a ``prepare`` callable that produces XGB-shaped components
     from a raw DataFrame.
 
-    Pipeline: pick numeric columns → ``ts_supervised_structure`` (lagged
-    features + target) → split 80/20 → fit separate ``StandardScaler``s
-    for X and y → return components dict expected by ``ModelTrainer.train_xgb``.
+    ``feature_names`` is the canonical feature order — target first,
+    covariates after. Columns are looked up in the DataFrame by name,
+    not by position, so a CSV with reordered columns (or an upstream
+    loader that joins in a different order) still trains the model on
+    the right target. Missing names raise; extras are ignored. ``None``
+    is single-target legacy mode that picks the first non-timestamp
+    column.
+
+    Pipeline: select named columns → ``ts_supervised_structure``
+    (lagged features + target) → split 80/20 → fit separate
+    ``StandardScaler``s for X and y → return components dict expected
+    by ``ModelTrainer.train_xgb``.
     """
 
     def prepare(df: pd.DataFrame) -> dict:
-        cols = [c for c in df.columns if c.lower() not in {"time", "timestamp", "date"}][
-            :num_variables
-        ]
-        if len(cols) < num_variables:
-            raise ValueError(
-                f"expected {num_variables} numeric column(s), found {len(cols)}: {cols}"
-            )
+        if feature_names is None:
+            cols = [next(c for c in df.columns if c.lower() not in _TIMESTAMP_COLS)]
+        else:
+            missing = [n for n in feature_names if n not in df.columns]
+            if missing:
+                raise ValueError(
+                    f"make_xgb_prepare expected columns {list(feature_names)!r}, "
+                    f"missing {missing!r}; DataFrame has {list(df.columns)!r}"
+                )
+            cols = list(feature_names)
+        num_variables = len(cols)
         data = df[cols].astype(float).reset_index(drop=True)
 
         split = int(len(data) * 0.8)

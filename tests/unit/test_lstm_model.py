@@ -24,7 +24,7 @@ def test_make_lstm_prepare_yields_3d_tensors():
     pytest.importorskip("torch")
     from intelligence.ml.models.lstm import make_lstm_prepare
 
-    prep = make_lstm_prepare(look_back=5, num_variables=1, batch_size=8)
+    prep = make_lstm_prepare(look_back=5, feature_names=["cpu"], batch_size=8)
     comps = prep(_synthetic_cpu())
 
     for key in (
@@ -72,7 +72,7 @@ def test_lstm_predict_multi_horizon():
     from intelligence.ml.models.lstm import LstmModel, make_lstm_prepare
 
     horizon = 3
-    prep = make_lstm_prepare(look_back=6, num_variables=1, batch_size=16, horizon=horizon)
+    prep = make_lstm_prepare(look_back=6, feature_names=["cpu"], batch_size=16, horizon=horizon)
     comps = prep(_synthetic_cpu(n=300))
     comps["model_parameters"] = {
         "input_size": 1,
@@ -129,7 +129,7 @@ def lstm_artifacts_fit():
     pytest.importorskip("torch")
     from intelligence.ml.models.lstm import LstmModel, make_lstm_prepare
 
-    prep = make_lstm_prepare(look_back=6, num_variables=1, batch_size=16)
+    prep = make_lstm_prepare(look_back=6, feature_names=["cpu"], batch_size=16)
     comps = prep(_synthetic_cpu(n=300))
     comps["model_parameters"] = {
         "input_size": 1,
@@ -247,6 +247,39 @@ def test_lstm_files_map_declares_only_safe_extensions(lstm_artifacts_fit, tmp_pa
         )
 
 
+def test_lstm_prepare_selects_features_by_name_not_position():
+    """``feature_names`` is the canonical order — target first.
+    A DataFrame with reordered columns must still train on the
+    declared target, not on whatever column came first by position.
+    """
+    from intelligence.ml.models.lstm import make_lstm_prepare
+
+    df = _synthetic_multivariate(n=300)
+    df = df[["timestamp", "load", "mem", "cpu"]]
+
+    prep = make_lstm_prepare(
+        look_back=6, feature_names=["cpu", "mem", "load"], batch_size=16, horizon=2
+    )
+    comps = prep(df)
+    assert comps["num_variables"] == 3
+    # scaler_obj is fit on the target column (cpu); cpu's range differs
+    # from load's. MinMaxScaler.data_min_ should be cpu's min, not load's.
+    cpu_min = float(df["cpu"].iloc[: int(0.8 * len(df))].min())
+    load_min = float(df["load"].iloc[: int(0.8 * len(df))].min())
+    assert abs(float(comps["scaler_obj"].data_min_[0]) - cpu_min) < 1e-9
+    assert abs(float(comps["scaler_obj"].data_min_[0]) - load_min) > 1e-3
+
+
+def test_lstm_prepare_raises_on_missing_feature_name():
+    """Typo'd feature name fails the prepare loudly."""
+    from intelligence.ml.models.lstm import make_lstm_prepare
+
+    df = _synthetic_multivariate(n=120)
+    prep = make_lstm_prepare(look_back=4, feature_names=["cpuuuu"], batch_size=8, horizon=1)
+    with pytest.raises(ValueError, match="cpuuuu"):
+        prep(df)
+
+
 def _synthetic_multivariate(n: int = 300, seed: int = 17) -> pd.DataFrame:
     """Two correlated series — cpu drives memory with a one-step lag —
     plus a noisy unrelated covariate. Forecasting cpu (target) should
@@ -265,7 +298,9 @@ def test_lstm_prepare_multivariate_emits_target_only_y():
     pytest.importorskip("torch")
     from intelligence.ml.models.lstm import make_lstm_prepare
 
-    prep = make_lstm_prepare(look_back=6, num_variables=3, batch_size=16, horizon=2)
+    prep = make_lstm_prepare(
+        look_back=6, feature_names=["cpu", "mem", "load"], batch_size=16, horizon=2
+    )
     comps = prep(_synthetic_multivariate())
 
     assert comps["X_train"].shape[2] == 3  # num_variables in input
@@ -283,7 +318,9 @@ def test_lstm_multivariate_train_and_predict_roundtrip():
     from intelligence.ml.models.lstm import LstmModel, make_lstm_prepare
 
     horizon = 2
-    prep = make_lstm_prepare(look_back=6, num_variables=3, batch_size=16, horizon=horizon)
+    prep = make_lstm_prepare(
+        look_back=6, feature_names=["cpu", "mem", "load"], batch_size=16, horizon=horizon
+    )
     comps = prep(_synthetic_multivariate(n=300))
     comps["model_parameters"] = {
         "input_size": 3,  # num_variables

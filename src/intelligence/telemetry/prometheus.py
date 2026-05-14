@@ -6,9 +6,10 @@ Thanos Query — same endpoints.
 
 Auth: pass a token via ``token_env`` (env var name) or ``token_file``
 (filesystem path). The token is read at call time, not at construction,
-so rotating the secret doesn't require recreating the source.
-``token_file`` is checked for existence at construction so a typo'd
-path fails the service at startup, not at first request.
+so rotating the secret doesn't require recreating the source. Both
+forms are validated at construction (env var must resolve to a
+non-empty value; file must exist) so a typo fails the service at
+startup, not at first request.
 
 TLS: ``tls_skip_verify=True`` disables certificate validation. Only use
 inside a trusted cluster.
@@ -17,6 +18,7 @@ inside a trusted cluster.
 from __future__ import annotations
 
 import logging
+import os
 from datetime import datetime, timedelta
 from pathlib import Path
 
@@ -41,6 +43,11 @@ class PrometheusSource:
             raise FileNotFoundError(
                 f"prometheus token_file {token_file!r} does not exist or is not a regular file"
             )
+        if token_env and not os.environ.get(token_env):
+            # Symmetric to the token_file check: a typo'd env var name
+            # would otherwise produce an empty Authorization header at
+            # first request, with no log line.
+            raise ValueError(f"prometheus token_env {token_env!r} is not set in the environment")
         self.endpoint = endpoint.rstrip("/")
         self.token_env = token_env
         self.token_file = token_file
@@ -48,8 +55,6 @@ class PrometheusSource:
         self.timeout = timeout
 
     def _headers(self) -> dict[str, str]:
-        import os
-
         token: str | None = None
         if self.token_env:
             token = os.environ.get(self.token_env)
@@ -81,6 +86,13 @@ class PrometheusSource:
     ) -> pd.DataFrame:
         if start is None or end is None or step is None:
             raise ValueError("PrometheusSource.fetch_range requires start, end, and step")
+        if start.tzinfo is None or end.tzinfo is None:
+            # ``datetime.timestamp()`` on a naïve datetime applies the
+            # host's local timezone, silently shifting the queried window
+            # by the local UTC offset. Reject upfront.
+            raise ValueError(
+                "PrometheusSource.fetch_range requires tz-aware datetimes for start and end"
+            )
         params = {
             "query": query,
             "start": start.timestamp(),
@@ -127,7 +139,15 @@ def _matrix_to_dataframe(series: list[dict]) -> pd.DataFrame:
     """Matrix = one series per metric, each with a list of [ts, val] pairs.
 
     Single series → ``[timestamp, value]``. Multi-series → ``[timestamp,
-    value_0, value_1, ...]`` joined on timestamp.
+    value_0, value_1, ...]`` inner-joined on timestamp.
+
+    Per-series duplicate timestamps (Thanos with overlapping stores, or
+    a recording rule replayed across an evaluation boundary) are
+    collapsed via ``keep="last"`` so the join key stays unique. The
+    multi-series join is an exact inner-join because all series in a
+    single matrix response share the same evaluation grid by
+    construction; any row missing from one series is dropped rather
+    than nearest-matched (which would silently fabricate alignment).
     """
     frames: list[pd.DataFrame] = []
     for i, s in enumerate(series):
@@ -135,12 +155,13 @@ def _matrix_to_dataframe(series: list[dict]) -> pd.DataFrame:
         df = pd.DataFrame(s["values"], columns=["timestamp", col])
         df["timestamp"] = pd.to_datetime(df["timestamp"], unit="s", utc=True)
         df[col] = df[col].astype(float)
-        frames.append(df.sort_values("timestamp"))
+        df = df.drop_duplicates(subset="timestamp", keep="last")
+        frames.append(df.sort_values("timestamp").reset_index(drop=True))
 
     out = frames[0]
     for f in frames[1:]:
-        out = pd.merge_asof(out, f, on="timestamp")
-    return out
+        out = out.merge(f, on="timestamp", how="inner")
+    return out.reset_index(drop=True)
 
 
 def _vector_to_dataframe(series: list[dict]) -> pd.DataFrame:

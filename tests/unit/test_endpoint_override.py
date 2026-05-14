@@ -82,13 +82,14 @@ def test_loader_rejects_override_when_flag_off():
         loader(desc)
 
 
-def test_loader_uses_override_when_flag_on():
+def test_loader_uses_override_when_flag_on(monkeypatch):
     """Flag on + request endpoint set: the loader builds a one-shot source
     against the override. The configured auth + tls settings carry over."""
     _maybe_field(PrometheusDataSource, "endpoint")
     _maybe_field(TelemetryConfig, "allow_endpoint_override")
     from intelligence.tasks.loaders import build_loader_for_task
 
+    monkeypatch.setenv("PROM_TOKEN", "token-value")
     cfg = IntelligenceConfig(
         telemetry=TelemetryConfig(
             source="prometheus",

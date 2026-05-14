@@ -15,6 +15,8 @@ import pandas as pd
 
 from intelligence.data import SAMPLES_DIR
 
+_TIMESTAMP_COLS = {"time", "timestamp", "date"}
+
 
 class StaticSource:
     """CSV-backed telemetry source.
@@ -37,7 +39,15 @@ class StaticSource:
         path = self.base_dir / query
         if not path.exists():
             raise FileNotFoundError(f"dataset not found: {query} (looked in {self.base_dir})")
-        return pd.read_csv(path).dropna()
+        df = pd.read_csv(path).dropna()
+        # Downstream prepares split train/test by row position and slide
+        # windows along the row axis. Out-of-order CSVs silently produce
+        # straddled splits; sort here so the row-position invariant
+        # holds without each prepare having to re-sort.
+        ts_col = next((c for c in df.columns if c.lower() in _TIMESTAMP_COLS), None)
+        if ts_col is not None:
+            df = df.sort_values(ts_col, kind="mergesort").reset_index(drop=True)
+        return df
 
     def is_ready(self) -> tuple[bool, str]:
         if not self.base_dir.exists():

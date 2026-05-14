@@ -52,10 +52,11 @@ def test_prometheus_missing_query_raises():
         build_loader_for_task(cfg, "cpu_forecast_arima")
 
 
-def test_prometheus_loader_carries_endpoint_and_auth():
+def test_prometheus_loader_carries_endpoint_and_auth(monkeypatch):
     from intelligence.tasks.loaders import build_loader_for_task
     from intelligence.telemetry import PrometheusSource
 
+    monkeypatch.setenv("PROM_TOKEN", "token-value")
     cfg = _cfg(
         source="prometheus",
         prometheus=PrometheusConfig(

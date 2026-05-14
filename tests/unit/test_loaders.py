@@ -102,6 +102,40 @@ def test_factory_signature_supports_optional_value_cols(samples_dir):
     assert "scaler_obj" in out
 
 
+def test_select_value_columns_raises_when_no_match(tmp_path):
+    """When ``value_cols`` is set but none of the requested names match
+    the DataFrame, falling back to "pass through and autodetect" silently
+    trains on whatever's first and numeric — a typo'd column name
+    becomes a wrong-model bug. Raise instead.
+    """
+    from intelligence.api.schemas import StaticDataSource
+    from intelligence.tasks.loaders import static_csv_loader
+
+    # CSV has 'cpu' but the loader asks for 'cpuuuu'.
+    p = tmp_path / "wrong.csv"
+    p.write_text(
+        "time,cpu\n" + "\n".join(f"2024-01-{i + 1:02d},{0.1 + 0.01 * i}" for i in range(40))
+    )
+    loader = static_csv_loader(value_cols=["cpuuuu"], base_dir=tmp_path)
+    with pytest.raises(ValueError, match=r"cpuuuu"):
+        loader(StaticDataSource(kind="static", name="wrong.csv"))
+
+
+def test_select_value_columns_case_insensitive_match_still_works(tmp_path):
+    """Case-folded matches are the documented contract — a request for
+    ``cpu`` must still match a column ``CPU``."""
+    from intelligence.api.schemas import StaticDataSource
+    from intelligence.tasks.loaders import static_csv_loader
+
+    p = tmp_path / "cased.csv"
+    p.write_text(
+        "time,CPU\n" + "\n".join(f"2024-01-{i + 1:02d},{0.1 + 0.01 * i}" for i in range(40))
+    )
+    loader = static_csv_loader(value_cols=["cpu"], base_dir=tmp_path)
+    out = loader(StaticDataSource(kind="static", name="cased.csv"))
+    assert "scaler_obj" in out
+
+
 # ---- PrometheusLoader ----------------------------------------------------
 
 
@@ -356,6 +390,84 @@ def test_prometheus_loader_multivariate_joins_on_timestamp():
 
     assert seen["columns"] == ["timestamp", "cpu", "mem"]
     assert seen["rows"] == 40
+
+
+def test_prometheus_loader_multi_query_merge_drops_rows_beyond_tolerance():
+    """When two separate PromQL queries land on different evaluation
+    grids, ``merge_asof`` must use ``tolerance ≤ step/2`` so a join only
+    succeeds for "near-aligned" timestamps. Drift larger than half a
+    step is a recording-rule disagreement and the row must be dropped,
+    not fabricated.
+    """
+    from intelligence.api.schemas import PrometheusDataSource
+    from intelligence.tasks.loaders import PrometheusLoader
+
+    class _DualSource:
+        def __init__(self, by_query: dict[str, pd.DataFrame]) -> None:
+            self._by_query = by_query
+
+        def fetch_range(self, query, start=None, end=None, step=None):
+            return self._by_query[query].copy()
+
+    # Step = 60s, so tolerance = 30s. Query A samples every 60s; query B
+    # is missing the middle samples — only B at t=0 and B at t=600 exist.
+    # The interior A rows have no B within step/2 and must be dropped.
+    n = 11
+    a_df = _fake_promql_df(n=n)  # ts at 1700000000, +60, +120, ..., +600
+    b_ts = pd.to_datetime([1700000000, 1700000600], unit="s", utc=True)
+    b_df = pd.DataFrame({"timestamp": b_ts, "value": [0.6, 0.7]})
+
+    seen: dict = {}
+
+    def custom_prepare(df):
+        seen["rows"] = len(df)
+        return {"marker": "ok"}
+
+    loader = PrometheusLoader(
+        source=_DualSource({"a_q": a_df, "b_q": b_df}),
+        queries=["a_q", "b_q"],
+        value_cols=["a", "b"],
+        prepare=custom_prepare,
+        min_points=0,
+    )
+    loader(PrometheusDataSource(kind="prometheus", window="1h", step="1m"))
+    assert seen["rows"] == 2, "only the two exactly-aligned rows must survive"
+
+
+def test_prometheus_loader_multi_query_merge_joins_within_tolerance():
+    """Drift within ``step/2`` is the normal evaluation-skew between
+    aligned recording rules; those rows must join.
+    """
+    from intelligence.api.schemas import PrometheusDataSource
+    from intelligence.tasks.loaders import PrometheusLoader
+
+    class _DualSource:
+        def __init__(self, by_query: dict[str, pd.DataFrame]) -> None:
+            self._by_query = by_query
+
+        def fetch_range(self, query, start=None, end=None, step=None):
+            return self._by_query[query].copy()
+
+    n = 40
+    a_df = _fake_promql_df(n=n)
+    # Query B is offset by 5s — well inside the 30s tolerance.
+    b_ts = pd.to_datetime([1700000000 + 60 * i + 5 for i in range(n)], unit="s", utc=True)
+    b_df = pd.DataFrame({"timestamp": b_ts, "value": [0.6 + 0.005 * i for i in range(n)]})
+
+    seen: dict = {}
+
+    def custom_prepare(df):
+        seen["rows"] = len(df)
+        return {"marker": "ok"}
+
+    loader = PrometheusLoader(
+        source=_DualSource({"a_q": a_df, "b_q": b_df}),
+        queries=["a_q", "b_q"],
+        value_cols=["a", "b"],
+        prepare=custom_prepare,
+    )
+    loader(PrometheusDataSource(kind="prometheus", window="1h", step="1m"))
+    assert seen["rows"] == n, "rows within tolerance must join"
 
 
 @pytest.mark.parametrize(

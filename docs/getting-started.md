@@ -73,11 +73,19 @@ helm install icos-intelligence-ocei \
 ```
 
 What the chart deploys: a Deployment, Service, ConfigMap (your tasks),
-Secret (empty here — no Prometheus token needed for an unauthenticated
-in-cluster Prometheus), and a PVC for the BentoML model store.
+and a PVC for the BentoML model store. No Secret is created here —
+unauthenticated in-cluster Prometheus doesn't need one. See below for
+adding a token.
 
-If your Prometheus requires a bearer token, add it to `secretEnv` in
-`values.yaml` and reference it from the telemetry block:
+If your Prometheus requires a bearer token, pre-create a Kubernetes
+Secret in the chart's namespace and reference it from `values.yaml` —
+the token never enters Helm release state or your shell history this
+way:
+
+```bash
+kubectl create secret generic intelligence-secrets \
+  --from-literal=PROM_TOKEN='your-bearer-token'
+```
 
 ```yaml
 config:
@@ -87,9 +95,16 @@ config:
         endpoint: https://prometheus.example.com
         token_env: PROM_TOKEN
 
-secretEnv:
-  PROM_TOKEN: "your-bearer-token"
+existingSecretName: intelligence-secrets
 ```
+
+Every key in the referenced Secret is mounted as an env var of the
+same name. Use sealed-secrets, external-secrets, or Vault in real
+deployments — `kubectl create secret` above is the minimal pattern.
+
+The chart also accepts an inline `secretEnv:` map as a shortcut for
+demos and local kind/minikube clusters, but those values pass through
+your shell + Helm release state. Don't use it in production.
 
 ## Step 2 — Verify it's up
 

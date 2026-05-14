@@ -32,16 +32,17 @@ def build_lstm_task(
         "output_size": task_cfg.horizon,
     }
 
+    feature_names = [f.name for f in task_cfg.features]
     return BaseTask(
         name=name,
         model=LstmModel(**model_params),
         data_loader=build_loader_for_task(
             intelligence_cfg,
             name,
-            value_cols=[f.name for f in task_cfg.features],
+            value_cols=feature_names,
             prepare=make_lstm_prepare(
                 look_back=task_cfg.steps_back,
-                num_variables=len(task_cfg.features),
+                feature_names=feature_names,
                 batch_size=task_cfg.batch_size,
                 horizon=task_cfg.horizon,
             ),

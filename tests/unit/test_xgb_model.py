@@ -24,7 +24,7 @@ def _synthetic_cpu(n: int = 120, seed: int = 7) -> pd.DataFrame:
 def test_make_xgb_prepare_yields_expected_components():
     from intelligence.ml.models.xgb import make_xgb_prepare
 
-    prep = make_xgb_prepare(look_back=4, num_variables=1)
+    prep = make_xgb_prepare(look_back=4, feature_names=["cpu"])
     comps = prep(_synthetic_cpu())
 
     for key in ("X_train", "X_test", "y_train", "y_test", "scaler_obj", "scaler_X", "look_back"):
@@ -61,7 +61,7 @@ def test_xgb_predict_recursive_multi_horizon():
     """
     from intelligence.ml.models.xgb import XgbModel, make_xgb_prepare
 
-    prep = make_xgb_prepare(look_back=6, num_variables=1)
+    prep = make_xgb_prepare(look_back=6, feature_names=["cpu"])
     comps = prep(_synthetic_cpu(n=200))
     comps["model_parameters"] = {"n_estimators": 20}
     model = XgbModel()
@@ -79,7 +79,7 @@ def test_xgb_predict_recursive_multi_horizon():
 def test_xgb_predict_horizon_one_returns_single_element_list():
     from intelligence.ml.models.xgb import XgbModel, make_xgb_prepare
 
-    prep = make_xgb_prepare(look_back=6, num_variables=1)
+    prep = make_xgb_prepare(look_back=6, feature_names=["cpu"])
     comps = prep(_synthetic_cpu(n=200))
     comps["model_parameters"] = {"n_estimators": 20}
     model = XgbModel()
@@ -100,7 +100,7 @@ def xgb_artifacts_fit():
     """A fresh ``(model, artifacts, metrics, comps)`` quad from ``XgbModel.fit``."""
     from intelligence.ml.models.xgb import XgbModel, make_xgb_prepare
 
-    prep = make_xgb_prepare(look_back=6, num_variables=1)
+    prep = make_xgb_prepare(look_back=6, feature_names=["cpu"])
     comps = prep(_synthetic_cpu(n=200))
     comps["model_parameters"] = {"n_estimators": 20, "max_depth": 3, "eta": 0.1}
     model = XgbModel()
@@ -224,12 +224,55 @@ def _synthetic_multivariate(n: int = 200, seed: int = 19) -> pd.DataFrame:
     return pd.DataFrame({"timestamp": np.arange(n), "cpu": cpu, "mem": mem, "load": load})
 
 
+def test_xgb_prepare_selects_features_by_name_not_position():
+    """``feature_names`` is the canonical order — target first. If the
+    upstream DataFrame's columns are in a different order (a CSV with
+    rearranged headers, a Prom join that put covariates first), the
+    prepare must still pick the right target. The previous
+    position-based slice would silently train on whatever column
+    happened to be first.
+    """
+    from intelligence.ml.models.xgb import make_xgb_prepare
+
+    df = _synthetic_multivariate(n=200)
+    # Reverse the non-timestamp columns: now positional pick = 'load'
+    # but feature_names says target is 'cpu'.
+    df = df[["timestamp", "load", "mem", "cpu"]]
+
+    prep = make_xgb_prepare(look_back=6, feature_names=["cpu", "mem", "load"])
+    comps = prep(df)
+    # The X-scaler's column names follow the supervised reshape; the
+    # underlying ``data`` must have been df[["cpu", "mem", "load"]], so
+    # the column-0 raw values seen by the supervised reshape are
+    # ``cpu``, not ``load``.
+    assert comps["num_variables"] == 3
+    # If the prepare had used positional selection, scaler_obj would
+    # have been fit on the 'load' column (which has very different
+    # statistics — load is centred at 0.3, cpu is centred at 0.5).
+    raw_cpu_min = float(df["cpu"].iloc[: int(0.8 * len(df))].min())
+    raw_cpu_max = float(df["cpu"].iloc[: int(0.8 * len(df))].max())
+    scaler_y = comps["scaler_obj"]
+    # StandardScaler.mean_ + scale_ should reflect cpu's distribution.
+    assert raw_cpu_min <= float(scaler_y.mean_[0]) <= raw_cpu_max
+
+
+def test_xgb_prepare_raises_on_missing_feature_name():
+    """A misconfigured feature name (typo in the YAML) must fail at
+    prepare time with a clear message, not silently mistrain."""
+    from intelligence.ml.models.xgb import make_xgb_prepare
+
+    df = _synthetic_multivariate(n=120)
+    prep = make_xgb_prepare(look_back=4, feature_names=["cpuuuu"])
+    with pytest.raises(ValueError, match="cpuuuu"):
+        prep(df)
+
+
 def test_xgb_multivariate_train_and_predict_roundtrip():
     """Train XGB with covariates; predict the target. Covariates flow
     through the lag-feature matrix; recursive horizon freezes them."""
     from intelligence.ml.models.xgb import XgbModel, make_xgb_prepare
 
-    prep = make_xgb_prepare(look_back=6, num_variables=3)
+    prep = make_xgb_prepare(look_back=6, feature_names=["cpu", "mem", "load"])
     comps = prep(_synthetic_multivariate(n=200))
     comps["model_parameters"] = {"n_estimators": 20}
     model = XgbModel()

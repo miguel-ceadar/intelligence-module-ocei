@@ -291,10 +291,13 @@ class PrometheusLoader:
         """Run all queries; join on timestamp for N > 1.
 
         Single-query path skips the thread pool to keep the n=1 case
-        identical in shape to the pre-multivariate code. The N > 1
-        path joins via ``merge_asof`` because aligned same-step queries
-        produce identical timestamps in the common case; ``merge_asof``
-        also tolerates small drift between sources without losing rows.
+        identical in shape to the pre-multivariate code. For N > 1
+        each query may land on a slightly different evaluation grid
+        (different recording rules, Thanos store skew), so we join
+        with ``merge_asof(direction="nearest", tolerance=step/2)`` —
+        rows within half a step are treated as the same tick, rows
+        further apart are dropped rather than nearest-matched across
+        an arbitrary gap.
         """
         if len(self.queries) == 1:
             df = source.fetch_range(self.queries[0], start=start, end=end, step=step)
@@ -312,10 +315,21 @@ class PrometheusLoader:
             self._check_nonempty(df, self.queries[i])
             renamed.append(self._rename_value_column(df, i))
 
+        tolerance = step / 2
         out = renamed[0].sort_values("timestamp")
         for other in renamed[1:]:
-            out = pd.merge_asof(out, other.sort_values("timestamp"), on="timestamp")
-        return out
+            out = pd.merge_asof(
+                out,
+                other.sort_values("timestamp"),
+                on="timestamp",
+                direction="nearest",
+                tolerance=tolerance,
+            )
+        # ``merge_asof`` keeps the left frame's rows; rows that couldn't
+        # join produce NaN on the right side. Drop those — the alternative
+        # is forwarding NaN into the prepare and crashing the scaler.
+        value_cols = [c for c in out.columns if c != "timestamp"]
+        return out.dropna(subset=value_cols).reset_index(drop=True)
 
     def _check_nonempty(self, df: pd.DataFrame, query: str) -> None:
         if df.empty:
@@ -486,10 +500,11 @@ def _select_value_columns(df: pd.DataFrame, value_cols: list[str]) -> pd.DataFra
     the requested casing). Columns not in ``value_cols`` are dropped;
     any timestamp column is preserved.
 
-    If none of the requested columns can be matched, the DataFrame is
-    returned untouched. The default prepare's autodetect path then
-    decides; bespoke prepares typically know which column to read by
-    name and will raise on missing data.
+    Any requested name that doesn't match (exact or case-insensitive)
+    is a configuration error — silently passing through would let a
+    typo train on whatever column the autodetect grabs first. Raise
+    with both the requested and available names so the operator can
+    fix the YAML.
     """
     available = list(df.columns)
     available_lower = {c.lower(): c for c in available}
@@ -497,6 +512,7 @@ def _select_value_columns(df: pd.DataFrame, value_cols: list[str]) -> pd.DataFra
 
     keep: list[str] = [ts_col] if ts_col else []
     renames: dict[str, str] = {}
+    missing: list[str] = []
 
     for name in value_cols:
         if name in available:
@@ -506,10 +522,13 @@ def _select_value_columns(df: pd.DataFrame, value_cols: list[str]) -> pd.DataFra
         if match is not None and match not in keep:
             renames[match] = name
             keep.append(name)
+            continue
+        missing.append(name)
 
-    # No requested column matched — pass through and let downstream decide.
-    if all(c == ts_col for c in keep):
-        return df
+    if missing:
+        raise ValueError(
+            f"value_cols {missing!r} not found in dataset; available columns: {available!r}"
+        )
 
     if renames:
         df = df.rename(columns=renames)
