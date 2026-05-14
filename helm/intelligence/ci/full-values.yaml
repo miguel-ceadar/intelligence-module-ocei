@@ -1,0 +1,92 @@
+# CI overlay: every optional template ON. Paired with minimal-values.yaml
+# in .github/workflows/ci.yml — exercises the cronjob, networkpolicy,
+# servicemonitor, PDB, startup probe, and RWX persistence branches.
+# Also flips existingSecretName on so the deployment's secret-source
+# pre-flight guard takes the "existing" path. Not deployable as-is.
+
+replicaCount: 2
+
+persistence:
+  enabled: true
+  accessMode: ReadWriteMany
+  size: 20Gi
+  storageClassName: fast
+
+startupProbe:
+  httpGet:
+    path: /readyz
+    port: http
+  initialDelaySeconds: 5
+  periodSeconds: 10
+  timeoutSeconds: 2
+  failureThreshold: 30
+
+serviceMonitor:
+  enabled: true
+  interval: 60s
+  scrapeTimeout: 15s
+  labels:
+    release: kube-prometheus-stack
+  namespaceSelector:
+    matchNames:
+      - monitoring
+
+retraining:
+  enabled: true
+  schedule: "0 */6 * * *"
+  tasks:
+    - cpu_forecast_arima
+  dataSource:
+    kind: prometheus
+    window: 24h
+    step: 1m
+
+podDisruptionBudget:
+  enabled: true
+  minAvailable: 1
+
+networkPolicy:
+  enabled: true
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: monitoring
+      ports:
+        - protocol: TCP
+          port: 3000
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: monitoring
+      ports:
+        - protocol: TCP
+          port: 9090
+
+extraEnv:
+  INTELLIGENCE_TELEMETRY__PROMETHEUS__ENDPOINT: https://prom.example.com
+
+existingSecretName: intelligence-secrets
+
+imagePullSecrets:
+  - name: ghcr-pull
+
+nodeSelector:
+  workload: intelligence
+
+tolerations:
+  - key: dedicated
+    operator: Equal
+    value: intelligence
+    effect: NoSchedule
+
+affinity:
+  nodeAffinity:
+    requiredDuringSchedulingIgnoredDuringExecution:
+      nodeSelectorTerms:
+        - matchExpressions:
+            - key: node-role
+              operator: In
+              values:
+                - intelligence

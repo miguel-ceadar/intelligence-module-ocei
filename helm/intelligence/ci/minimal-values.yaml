@@ -1,0 +1,19 @@
+# CI overlay: every optional template OFF. Paired with full-values.yaml
+# in .github/workflows/ci.yml — the matrix proves the chart still
+# renders when conditionals collapse and no PVC/cronjob/PDB/etc. is
+# emitted. Not intended as a deployable values set.
+
+persistence:
+  enabled: false
+
+serviceMonitor:
+  enabled: false
+
+retraining:
+  enabled: false
+
+podDisruptionBudget:
+  enabled: false
+
+networkPolicy:
+  enabled: false

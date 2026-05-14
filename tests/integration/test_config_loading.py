@@ -80,6 +80,23 @@ def test_config_drift_with_unknown_forecaster_raises(tmp_path: Path):
         config.load_config(p)
 
 
+def test_appconfig_defaults_evaluate_env_at_call_not_import(monkeypatch):
+    """``AppConfig()`` with no YAML should read env vars at *call*, not at
+    module import. The old ``intelligence: IntelligenceConfig =
+    IntelligenceConfig()`` default captured env at class-definition
+    time, so an env var set later via monkeypatch was ignored. Use
+    ``Field(default_factory=...)`` so each call re-evaluates."""
+    monkeypatch.setenv(
+        "INTELLIGENCE_TELEMETRY__PROMETHEUS__ENDPOINT", "http://late-bound:9090"
+    )
+    monkeypatch.setenv("INTELLIGENCE_TELEMETRY__SOURCE", "prometheus")
+
+    cfg = config.load_config(None, validate=False)
+    assert cfg.intelligence.telemetry.source == "prometheus"
+    assert cfg.intelligence.telemetry.prometheus is not None
+    assert cfg.intelligence.telemetry.prometheus.endpoint == "http://late-bound:9090"
+
+
 def test_config_env_var_override(monkeypatch, tmp_path: Path):
     """Standard pydantic-settings: env vars override file values."""
     p = tmp_path / "prom.yaml"

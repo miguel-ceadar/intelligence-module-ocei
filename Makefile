@@ -1,6 +1,8 @@
 .PHONY: install install-dev install-legacy lint format test test-fast test-integration clean \
         up-demo down-demo logs-demo smoke e2e stress e2e-stress \
-        up-dev down-dev logs-dev e2e-dev e2e-stress-dev chart-lint chart-template
+        up-dev down-dev logs-dev e2e-dev e2e-stress-dev \
+        chart-lint chart-template chart-template-matrix \
+        chart-e2e-up chart-e2e chart-e2e-down
 
 # The compose stack is a DEMO only (image + bundled prometheus + node-exporter
 # for "see it work in 3 minutes"). Pilots deploy via the Helm chart (k8s) or
@@ -117,3 +119,60 @@ chart-lint:
 
 chart-template:
 	helm template icos-intelligence-ocei helm/intelligence
+
+# Render the chart against every CI overlay. Mirrors the `helm` job in
+# .github/workflows/ci.yml — keep the two in sync when adding overlays.
+chart-template-matrix:
+	helm template icos-intelligence-ocei helm/intelligence
+	helm template icos-intelligence-ocei helm/intelligence -f helm/intelligence/ci/minimal-values.yaml
+	helm template icos-intelligence-ocei helm/intelligence -f helm/intelligence/ci/full-values.yaml
+
+# End-to-end install into a local kind cluster — k8s counterpart to
+# `make e2e` (which boots compose + runs the smoke suite). Same shape:
+# `chart-e2e-up` boots the stack and leaves it running; `chart-e2e`
+# runs the smoke suite against it; `chart-e2e-down` tears it all down.
+#
+# Prereqs: docker, kind, kubectl, helm, uv. Not in CI — too slow and
+# pulls in tooling the runners don't always have. Run before tagging a
+# release or after touching helm/intelligence/templates/**.
+KIND_CLUSTER ?= icos-intelligence-test
+CHART_E2E_IMAGE := icos-intelligence-ocei:chart-e2e
+
+# Boot kind, build the local image into the cluster, deploy the
+# Prometheus + node-exporter pair that mirrors the compose stack, then
+# helm-install the chart against that Prometheus. Leaves everything
+# running. The Prom + node-exporter manifests live next to the values
+# overlay in helm/intelligence/ci/ — keep them in sync with compose/.
+chart-e2e-up:
+	@kind get clusters | grep -q "^$(KIND_CLUSTER)$$" || kind create cluster --name $(KIND_CLUSTER)
+	docker build -t $(CHART_E2E_IMAGE) .
+	kind load docker-image $(CHART_E2E_IMAGE) --name $(KIND_CLUSTER)
+	kubectl apply -f helm/intelligence/ci/prom-stack.yaml
+	kubectl rollout status deploy/prometheus    --timeout=180s
+	kubectl rollout status deploy/node-exporter --timeout=180s
+	helm upgrade --install intelligence helm/intelligence \
+		--set fullnameOverride=intelligence \
+		--set image.repository=icos-intelligence-ocei \
+		--set image.tag=chart-e2e \
+		--set image.pullPolicy=Never \
+		-f helm/intelligence/ci/e2e-values.yaml \
+		--wait --timeout 5m
+
+# Port-forward the chart's Service and the in-cluster Prometheus so the
+# smoke suite hits the same localhost:3000 / localhost:9090 endpoints
+# it uses against compose, then run it. Both forwards are killed on
+# exit; the release stays up for `make chart-e2e-down` (mirrors how
+# `make e2e` leaves compose up for `make down-demo`).
+chart-e2e: chart-e2e-up
+	@bash -c 'set -e; \
+		kubectl port-forward svc/intelligence 3000:3000 >/dev/null 2>&1 & PF_I=$$!; \
+		kubectl port-forward svc/prometheus   9090:9090 >/dev/null 2>&1 & PF_P=$$!; \
+		trap "kill $$PF_I $$PF_P 2>/dev/null || true" EXIT; \
+		sleep 3; \
+		uv run pytest -m smoke -v || (kubectl logs deploy/intelligence; exit 1)'
+	@echo "chart-e2e passed. Stack left running — 'make chart-e2e-down' to tear it all down."
+
+chart-e2e-down:
+	-helm uninstall intelligence 2>/dev/null
+	-kubectl delete -f helm/intelligence/ci/prom-stack.yaml 2>/dev/null
+	kind delete cluster --name $(KIND_CLUSTER)

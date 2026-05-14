@@ -132,11 +132,12 @@ class BootstrapConfig(BaseModel):
 
 
 class ArimaModelParams(BaseModel):
-    """ARIMA order. Defaults match ``ArimaModel.__init__``."""
+    """ARIMA order. Defaults match ``ArimaModel.__init__``. Each field
+    must be non-negative; statsmodels rejects all-zeros at fit time."""
 
-    p: int = 5
-    d: int = 1
-    q: int = 0
+    p: int = Field(default=5, ge=0)
+    d: int = Field(default=1, ge=0)
+    q: int = Field(default=0, ge=0)
 
 
 class XgbModelParams(BaseModel):
@@ -145,20 +146,23 @@ class XgbModelParams(BaseModel):
     """
 
     model_config = SettingsConfigDict(extra="allow")
-    n_estimators: int = 100
-    max_depth: int = 3
-    eta: float = 0.1
+    n_estimators: int = Field(default=100, gt=0)
+    max_depth: int = Field(default=3, gt=0)
+    eta: float = Field(default=0.1, gt=0)
 
 
 class LstmModelParams(BaseModel):
     """LSTM network shape. ``num_epochs`` deliberately small by default so
     the demo trains fast; real deployments override.
+
+    ``input_size`` and ``output_size`` are deliberately absent — the
+    builder derives them from ``len(features)`` and ``horizon``, so
+    surfacing them on the schema would let a YAML value lie about a
+    knob the builder will override anyway.
     """
 
-    input_size: int = 1
-    output_size: int = 1
-    hidden_size: int = 4
-    num_epochs: int = 3
+    hidden_size: int = Field(default=4, gt=0)
+    num_epochs: int = Field(default=3, gt=0)
 
 
 class FeatureSpec(BaseModel):
@@ -188,6 +192,17 @@ class FeatureSpec(BaseModel):
     query: str | None = None
     value_range: tuple[float, float] | None = None
 
+    @model_validator(mode="after")
+    def _value_range_lo_lt_hi(self) -> FeatureSpec:
+        if self.value_range is not None:
+            lo, hi = self.value_range
+            if not lo < hi:
+                raise ValueError(
+                    f"feature {self.name!r}: value_range must satisfy lo < hi, "
+                    f"got ({lo}, {hi})"
+                )
+        return self
+
 
 class _BaseTaskConfig(BaseModel):
     """Fields shared by every kind.
@@ -213,16 +228,16 @@ class ArimaTaskConfig(_BaseTaskConfig):
     """``kind: arima`` — single-observation lookback, statsmodels ARIMA."""
 
     kind: Literal["arima"]
-    steps_back: int = 1
-    model_params: ArimaModelParams = ArimaModelParams()
+    steps_back: int = Field(default=1, gt=0)
+    model_params: ArimaModelParams = Field(default_factory=ArimaModelParams)
 
 
 class XgbTaskConfig(_BaseTaskConfig):
     """``kind: xgb`` — sliding-window XGBoost regressor."""
 
     kind: Literal["xgb"]
-    steps_back: int = 6
-    model_params: XgbModelParams = XgbModelParams()
+    steps_back: int = Field(default=6, gt=0)
+    model_params: XgbModelParams = Field(default_factory=XgbModelParams)
 
 
 class LstmTaskConfig(_BaseTaskConfig):
@@ -237,10 +252,17 @@ class LstmTaskConfig(_BaseTaskConfig):
     """
 
     kind: Literal["lstm"]
-    steps_back: int = 6
-    batch_size: int = 16
-    horizon: int = 1
-    model_params: LstmModelParams = LstmModelParams()
+    steps_back: int = Field(default=6, gt=0)
+    batch_size: int = Field(default=16, gt=0)
+    horizon: int = Field(default=1, gt=0)
+    model_params: LstmModelParams = Field(default_factory=LstmModelParams)
+
+
+# NannyML registers exactly these four methods for continuous features
+# (see ``nannyml/drift/univariate/methods.py``). Anything else is a typo
+# that would surface as a runtime KeyError inside the calculator —
+# better to refuse the YAML at startup.
+DriftMetric = Literal["jensen_shannon", "kolmogorov_smirnov", "wasserstein", "hellinger"]
 
 
 class DriftTaskConfig(_BaseTaskConfig):
@@ -253,8 +275,8 @@ class DriftTaskConfig(_BaseTaskConfig):
 
     kind: Literal["drift"]
     forecaster: str
-    chunk_size: int = 12
-    metric: str = "jensen_shannon"
+    chunk_size: int = Field(default=12, gt=0)
+    metric: DriftMetric = "jensen_shannon"
 
 
 # Discriminated union — pydantic dispatches on ``kind`` and produces a
@@ -305,7 +327,12 @@ class IntelligenceConfig(BaseSettings):
 
 
 class AppConfig(BaseModel):
-    intelligence: IntelligenceConfig = IntelligenceConfig()
+    # ``default_factory`` (not ``= IntelligenceConfig()``) so each
+    # ``AppConfig()`` re-evaluates env vars at call time. The
+    # bare-instance default would freeze whatever env was set at
+    # *module import*, which surprises tests that monkeypatch env vars
+    # later and any caller that mutates env between import and use.
+    intelligence: IntelligenceConfig = Field(default_factory=IntelligenceConfig)
 
     def validate_against_registry(self) -> None:
         """Cross-reference checks that pydantic can't express on its own.

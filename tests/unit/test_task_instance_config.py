@@ -91,7 +91,9 @@ def test_lstm_block_carries_batch_size_and_network_shape():
     assert cfg.batch_size == 32
     assert cfg.model_params.hidden_size == 16
     assert cfg.model_params.num_epochs == 10
-    assert cfg.model_params.input_size == 1  # default preserved
+    # ``input_size`` / ``output_size`` are deliberately *not* on the schema —
+    # the builder derives them from ``len(features)`` and ``horizon``.
+    assert "input_size" not in LstmTaskConfig.model_fields["model_params"].annotation.model_fields
 
 
 def test_lstm_horizon_defaults_to_one():
@@ -177,6 +179,150 @@ def test_multivariate_features_list_parses():
     assert len(cfg.features) == 3
     assert [f.name for f in cfg.features] == ["cpu", "memory", "load"]
     assert cfg.features[2].value_range is None
+
+
+# --- §4 maintainability: schema tightening ---------------------------------
+#
+# Each block here pins a class of misconfig that used to parse cleanly and
+# blow up (or silently mis-train) at runtime.
+
+
+def test_lstm_model_params_have_no_dead_input_or_output_size():
+    """``LstmModelParams.input_size`` / ``output_size`` are silently
+    overridden by the builder (set from ``len(features)`` and
+    ``horizon``). They're a trap on the schema — a YAML that sets them
+    is lying to its reader. Drop them.
+    """
+    from intelligence.config.settings import LstmModelParams
+
+    assert "input_size" not in LstmModelParams.model_fields
+    assert "output_size" not in LstmModelParams.model_fields
+    # ``hidden_size`` is a real knob (passed through by the builder) — keep it.
+    assert "hidden_size" in LstmModelParams.model_fields
+
+
+@pytest.mark.parametrize(
+    "kind,field,bad_value",
+    [
+        ("arima", "steps_back", 0),
+        ("arima", "steps_back", -1),
+        ("xgb", "steps_back", 0),
+        ("lstm", "steps_back", 0),
+        ("lstm", "horizon", 0),
+        ("lstm", "batch_size", 0),
+    ],
+)
+def test_task_window_fields_reject_non_positive(kind, field, bad_value):
+    payload = {"kind": kind, "features": [{"name": "cpu"}], field: bad_value}
+    with pytest.raises(ValidationError, match=field):
+        _parse(payload)
+
+
+def test_drift_chunk_size_rejects_non_positive():
+    payload = {
+        "kind": "drift",
+        "features": [{"name": "cpu"}],
+        "forecaster": "f",
+        "chunk_size": 0,
+    }
+    with pytest.raises(ValidationError, match="chunk_size"):
+        _parse(payload)
+
+
+@pytest.mark.parametrize(
+    "params,bad_field",
+    [
+        ({"n_estimators": 0}, "n_estimators"),
+        ({"max_depth": 0}, "max_depth"),
+        ({"eta": 0.0}, "eta"),
+    ],
+)
+def test_xgb_model_params_reject_non_positive(params, bad_field):
+    payload = {"kind": "xgb", "features": [{"name": "cpu"}], "model_params": params}
+    with pytest.raises(ValidationError, match=bad_field):
+        _parse(payload)
+
+
+@pytest.mark.parametrize(
+    "params,bad_field",
+    [
+        ({"hidden_size": 0}, "hidden_size"),
+        ({"num_epochs": 0}, "num_epochs"),
+    ],
+)
+def test_lstm_model_params_reject_non_positive(params, bad_field):
+    payload = {"kind": "lstm", "features": [{"name": "cpu"}], "model_params": params}
+    with pytest.raises(ValidationError, match=bad_field):
+        _parse(payload)
+
+
+@pytest.mark.parametrize(
+    "params,bad_field",
+    [
+        ({"p": -1}, "p"),
+        ({"d": -1}, "d"),
+        ({"q": -1}, "q"),
+    ],
+)
+def test_arima_model_params_reject_negative(params, bad_field):
+    """ARIMA p/d/q must be non-negative; ``(0, 0, 0)`` is degenerate but
+    statsmodels' job to reject, not the schema's."""
+    payload = {"kind": "arima", "features": [{"name": "cpu"}], "model_params": params}
+    with pytest.raises(ValidationError, match=bad_field):
+        _parse(payload)
+
+
+def test_drift_metric_restricted_to_nannyml_continuous_methods():
+    """NannyML's ``UnivariateDriftCalculator`` registers exactly four
+    methods for continuous features: ``jensen_shannon``,
+    ``kolmogorov_smirnov``, ``wasserstein``, ``hellinger``. Anything
+    else blows up inside the calculator at predict time — push the
+    check up to the schema."""
+    for metric in ("jensen_shannon", "kolmogorov_smirnov", "wasserstein", "hellinger"):
+        cfg = _parse(
+            {
+                "kind": "drift",
+                "features": [{"name": "cpu"}],
+                "forecaster": "f",
+                "metric": metric,
+            }
+        )
+        assert isinstance(cfg, DriftTaskConfig)
+        assert cfg.metric == metric
+
+    with pytest.raises(ValidationError, match="metric"):
+        _parse(
+            {
+                "kind": "drift",
+                "features": [{"name": "cpu"}],
+                "forecaster": "f",
+                "metric": "kullback_leibler",
+            }
+        )
+
+
+def test_feature_value_range_rejects_inverted_bounds():
+    """A ``(hi, lo)`` value_range parses cleanly today and every predict
+    request then fails the runtime range check. Catch it at schema time."""
+    with pytest.raises(ValidationError, match="value_range"):
+        _parse(
+            {
+                "kind": "arima",
+                "features": [{"name": "cpu", "value_range": [1.0, 0.0]}],
+            }
+        )
+
+
+def test_feature_value_range_rejects_equal_bounds():
+    """``lo == hi`` makes the only valid value the single endpoint — a
+    spec-time bug, not an intentional constraint. Reject."""
+    with pytest.raises(ValidationError, match="value_range"):
+        _parse(
+            {
+                "kind": "arima",
+                "features": [{"name": "cpu", "value_range": [0.5, 0.5]}],
+            }
+        )
 
 
 def test_bootstrap_block_nested_under_task():
