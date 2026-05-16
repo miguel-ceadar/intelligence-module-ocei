@@ -309,5 +309,3 @@ def test_is_ready_returns_failure_on_non_200(mock_get):
     ok, msg = src.is_ready()
     assert ok is False
     assert "503" in msg
-
-

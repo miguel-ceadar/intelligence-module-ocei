@@ -281,5 +281,3 @@ def make_xgb_prepare(
         }
 
     return prepare
-
-

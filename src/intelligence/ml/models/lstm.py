@@ -321,5 +321,3 @@ def make_lstm_prepare(
         }
 
     return prepare
-
-

@@ -175,5 +175,3 @@ class ArimaModel:
             )
             for m, lo, hi in zip(mean_raw, lower_raw, upper_raw, strict=True)
         ]
-
-

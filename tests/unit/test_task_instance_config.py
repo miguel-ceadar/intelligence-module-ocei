@@ -12,7 +12,6 @@ from pydantic import TypeAdapter, ValidationError
 from intelligence.config.settings import (
     ArimaTaskConfig,
     DriftTaskConfig,
-    FeatureSpec,
     LstmTaskConfig,
     TaskInstanceConfig,
     XgbTaskConfig,

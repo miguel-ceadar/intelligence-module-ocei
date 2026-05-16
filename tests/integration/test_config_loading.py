@@ -86,9 +86,7 @@ def test_appconfig_defaults_evaluate_env_at_call_not_import(monkeypatch):
     IntelligenceConfig()`` default captured env at class-definition
     time, so an env var set later via monkeypatch was ignored. Use
     ``Field(default_factory=...)`` so each call re-evaluates."""
-    monkeypatch.setenv(
-        "INTELLIGENCE_TELEMETRY__PROMETHEUS__ENDPOINT", "http://late-bound:9090"
-    )
+    monkeypatch.setenv("INTELLIGENCE_TELEMETRY__PROMETHEUS__ENDPOINT", "http://late-bound:9090")
     monkeypatch.setenv("INTELLIGENCE_TELEMETRY__SOURCE", "prometheus")
 
     cfg = config.load_config(None, validate=False)

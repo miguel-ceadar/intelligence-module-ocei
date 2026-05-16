@@ -198,8 +198,7 @@ class FeatureSpec(BaseModel):
             lo, hi = self.value_range
             if not lo < hi:
                 raise ValueError(
-                    f"feature {self.name!r}: value_range must satisfy lo < hi, "
-                    f"got ({lo}, {hi})"
+                    f"feature {self.name!r}: value_range must satisfy lo < hi, got ({lo}, {hi})"
                 )
         return self
 
