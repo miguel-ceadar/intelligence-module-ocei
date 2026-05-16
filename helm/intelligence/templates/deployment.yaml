@@ -9,6 +9,9 @@ CrashLoopBackOff or a silently-ignored field.
 {{- if and .Values.existingSecretName .Values.secretEnv -}}
 {{- fail "existingSecretName and secretEnv are both set: secretEnv would be silently ignored. Pick one — either reference an existing Secret (existingSecretName) or let the chart create one from secretEnv." -}}
 {{- end -}}
+{{- if not .Values.config.intelligence.tasks -}}
+{{- fail "config.intelligence.tasks is empty: the pod starts but /readyz stays 503 forever (the registry needs at least one task to serve). Declare at least one task under config.intelligence.tasks — see helm/intelligence/README.md and examples/*/config.yaml." -}}
+{{- end -}}
 apiVersion: apps/v1
 kind: Deployment
 metadata:

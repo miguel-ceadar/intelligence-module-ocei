@@ -41,7 +41,7 @@ docker run -d --name icos-intelligence-ocei \
   -e INTELLIGENCE_TELEMETRY__PROMETHEUS__ENDPOINT=https://your-prom \
   -v "$PWD/examples/cpu_forecast/config.yaml:/etc/intelligence/config.yaml:ro" \
   -v intelligence-bentoml:/var/lib/bentoml \
-  ghcr.io/miguel-ceadar/icos-intelligence-ocei:0.1.0
+  ghcr.io/miguel-ceadar/icos-intelligence-ocei:0.2.10
 
 curl -X POST http://localhost:3000/tasks/cpu_forecast_arima/train \
   -H 'Content-Type: application/json' \

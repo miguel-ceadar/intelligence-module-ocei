@@ -82,7 +82,7 @@ is a template you can feed those tools.
 ```bash
 helm install intelligence-energy \
   oci://ghcr.io/miguel-ceadar/charts/icos-intelligence-ocei \
-  --version 0.2.8 -n energy-forecast \
+  --version 0.2.10 -n energy-forecast \
   -f examples/energy_forecast/k8s/values-walkthrough.yaml
 ```
 
@@ -110,10 +110,10 @@ kubectl -n energy-forecast port-forward \
   svc/intelligence-energy-icos-intelligence-ocei 3000:3000 &
 
 curl http://localhost:3000/healthz
-# {"status":"ok","version":"0.1.0"}
+# {"status":"ok","version":"0.2.10"}
 
 curl http://localhost:3000/readyz
-# {"status":"ready","tasks":2,"version":"0.1.0"}
+# {"status":"ready","tasks":2,"version":"0.2.10"}
 
 curl -i http://localhost:3000/tasks
 # HTTP/1.1 401 Unauthorized
@@ -194,7 +194,6 @@ curl -s -X POST http://localhost:3000/tasks/energy_forecast_arima/predict \
     {"value": 170.90, "lower": 150.25, "upper": 191.55},
     {"value": 169.38, "lower": 145.94, "upper": 192.83}
   ],
-  "metric_type": null,
   "model_version": "nqgzbdcpuslzfex2"
 }
 ```
@@ -216,7 +215,6 @@ curl -s -X POST http://localhost:3000/tasks/energy_forecast_arima_drift/predict 
     "metric": "jensen_shannon",
     "forecaster": "energy_forecast_arima"
   },
-  "metric_type": null,
   "model_version": "nraqkuspuslzfex2"
 }
 ```
@@ -274,7 +272,7 @@ config:
 ```bash
 helm upgrade intelligence-energy \
   oci://ghcr.io/miguel-ceadar/charts/icos-intelligence-ocei \
-  --version 0.1.0 -n energy-forecast \
+  --version 0.2.10 -n energy-forecast \
   -f examples/energy_forecast/k8s/values-walkthrough.yaml
 ```
 
@@ -312,7 +310,7 @@ declares an XGBoost task against the same metric:
 ```bash
 helm upgrade intelligence-energy \
   oci://ghcr.io/miguel-ceadar/charts/icos-intelligence-ocei \
-  --version 0.1.0 -n energy-forecast \
+  --version 0.2.10 -n energy-forecast \
   -f examples/energy_forecast/k8s/values-walkthrough.yaml \
   -f examples/energy_forecast/k8s/values-with-xgb.yaml
 ```

@@ -68,7 +68,7 @@ Install:
 ```bash
 helm install icos-intelligence-ocei \
   oci://ghcr.io/miguel-ceadar/charts/icos-intelligence-ocei \
-  --version 0.1.0 \
+  --version 0.2.10 \
   -f values.yaml
 ```
 
@@ -117,10 +117,10 @@ kubectl wait --for=condition=ready pod \
 kubectl port-forward svc/icos-intelligence-ocei 3000:3000 &
 
 curl http://localhost:3000/healthz
-# {"status":"ok"}
+# {"status":"ok","version":"0.2.10"}
 
 curl http://localhost:3000/tasks
-# [{"name":"cpu_forecast_arima","model_type":"arima","has_drift":false}]
+# {"tasks":[{"name":"cpu_forecast_arima","model_type":"arima","has_drift":false,"is_loaded":false}]}
 ```
 
 If `/tasks` is empty or returns a different name, your values file's
@@ -197,7 +197,6 @@ Response:
 ```json
 {
   "prediction": [{"value": 0.45, "lower": 0.38, "upper": 0.52}],
-  "metric_type": null,
   "model_version": "2nrgmtnnxsfopjqf"
 }
 ```
@@ -254,7 +253,6 @@ curl -X POST http://localhost:3000/tasks/cpu_forecast_arima_drift/predict \
     "metric": "jensen_shannon",
     "forecaster": "cpu_forecast_arima"
   },
-  "metric_type": null,
   "model_version": "<train-tag>"
 }
 ```

@@ -1,9 +1,11 @@
 # Default values for the intelligence chart.
 # Override on `helm install` / `helm upgrade` with --set or -f <values-file>.
 
-# -- Container image. Defaults to the published GHCR image; override
-# `image.tag` to pin a specific build (recommended — `latest` is for
-# the demo stack and drifts under you).
+# -- Container image. Defaults to the published GHCR image. Pin
+# `image.tag` to a specific release in production — empty falls back to
+# `.Chart.AppVersion`, which is stable per chart version (rewritten
+# from the git tag at release time). Avoid `latest` — that's the
+# demo-stack convenience tag and drifts under you.
 image:
   repository: ghcr.io/miguel-ceadar/icos-intelligence-ocei
   tag: ""           # falls back to .Chart.AppVersion when empty
@@ -44,6 +46,10 @@ config:
       prometheus:
         endpoint: http://prometheus.monitoring.svc:9090
         # token_env: PROM_TOKEN   # uncomment + populate via secretEnv
+    # auth:
+    #   token_env: API_TOKEN     # require Authorization: Bearer on /train, /predict, /tasks
+                                  # (probes + /metrics + /docs stay open). Off by default —
+                                  # the pod logs a warning at startup if disabled.
     tasks: {}
 
 # -- Plain (non-secret) env-var overrides, applied on top of the config
@@ -65,6 +71,7 @@ existingSecretName: ""
 secretEnv: {}
   # demo only — production should use existingSecretName
   # PROM_TOKEN: ""          # referenced from config.intelligence.telemetry.prometheus.token_env
+  # API_TOKEN: ""           # referenced from config.intelligence.auth.token_env
   # HF_TOKEN: ""            # for /models/sync push/pull
 
 # -- BentoML model store. Persists trained models across pod restarts.

@@ -6,8 +6,12 @@ description: |
   already run — no glue code, no separate training infra.
   CeADAR Ireland's O-CEI iteration of the ICOS intelligence module.
 type: application
-version: 0.1.0
-appVersion: "0.1.0"
+# version + appVersion are rewritten from the git tag at release time
+# (see .github/workflows/release.yml). The in-repo values are kept in
+# sync with pyproject.toml so `helm template helm/intelligence` locally
+# matches the most recent release.
+version: 0.2.10
+appVersion: "0.2.10"
 keywords:
   - forecasting
   - drift-detection

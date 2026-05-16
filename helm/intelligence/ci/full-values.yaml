@@ -3,6 +3,18 @@
 # servicemonitor, PDB, startup probe, and RWX persistence branches.
 # Also flips existingSecretName on so the deployment's secret-source
 # pre-flight guard takes the "existing" path. Not deployable as-is.
+#
+# A single task block is declared so the chart's "tasks must be
+# non-empty" pre-flight guard is satisfied.
+
+config:
+  intelligence:
+    tasks:
+      cpu_forecast_arima:
+        kind: arima
+        steps_back: 1
+        features:
+          - name: cpu
 
 replicaCount: 2
 

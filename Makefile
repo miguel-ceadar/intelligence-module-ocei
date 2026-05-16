@@ -1,4 +1,6 @@
-.PHONY: install install-dev lint format test test-fast test-integration clean \
+.DEFAULT_GOAL := help
+
+.PHONY: help install install-dev lint format test test-fast test-integration clean \
         up-demo down-demo logs-demo smoke e2e stress e2e-stress \
         up-dev down-dev logs-dev e2e-dev e2e-stress-dev \
         chart-lint chart-template chart-template-matrix \
@@ -10,21 +12,26 @@
 COMPOSE_DEMO := docker compose -f docker-compose.demo.yml
 COMPOSE_DEV  := docker compose -f docker-compose.demo.yml -f docker-compose.dev.yml
 
+help:  ## Show this help; lists every documented target.
+	@awk -F '## ' '/^[a-zA-Z0-9_-]+:[^=]*## / {split($$1, a, ":"); printf "  %-22s %s\n", a[1], $$2}' $(MAKEFILE_LIST)
+	@echo
+	@echo "Undocumented targets (less common): smoke, stress, test-fast, test-integration, logs-{demo,dev}, e2e-{stress,dev,stress-dev}, chart-{template,template-matrix,e2e-up,e2e-down}, install, clean"
+
 install:
 	pip install -e .
 
-install-dev:
+install-dev:  ## Install the package + dev dependencies (pytest, ruff, etc.).
 	pip install -e ".[dev]"
 
-lint:
+lint:  ## Ruff check + format check (no edits).
 	ruff check src tests
 	ruff format --check src tests
 
-format:
+format:  ## Ruff format + auto-fix (edits in place).
 	ruff format src tests
 	ruff check --fix src tests
 
-test:
+test:  ## Run the full test suite (unit + integration; smoke/stress excluded by default).
 	pytest
 
 test-fast:
@@ -43,10 +50,10 @@ clean:
 # Pulls the published image from GHCR + spins up prometheus + node-exporter.
 # Pin the tag via `INTELLIGENCE_TAG=v0.1.0 make up-demo`.
 
-up-demo:
+up-demo:  ## Boot the in-repo demo stack (published image + bundled Prometheus + node-exporter).
 	$(COMPOSE_DEMO) up -d --wait
 
-down-demo:
+down-demo:  ## Tear down the demo stack and its volumes.
 	$(COMPOSE_DEMO) down -v
 
 logs-demo:
@@ -57,7 +64,7 @@ logs-demo:
 smoke:
 	uv run pytest -m smoke -v
 
-e2e: up-demo
+e2e: up-demo  ## Boot the demo stack and run the smoke suite end-to-end.
 	uv run pytest -m smoke -v || ($(COMPOSE_DEMO) logs intelligence; exit 1)
 
 # Stress runs against the same compose stack as `make e2e` — the demo
@@ -89,7 +96,7 @@ e2e-stress: up-demo
 # `up` can swallow build output behind the wait spinner. `--force-recreate`
 # guarantees the container is replaced even when compose's image-hash
 # check decides the existing container is still valid.
-up-dev:
+up-dev:  ## Build the image from local sources and boot the demo stack against it.
 	$(COMPOSE_DEV) build intelligence
 	$(COMPOSE_DEV) up -d --force-recreate --wait
 
@@ -111,16 +118,17 @@ e2e-stress-dev: up-dev
 
 # --- Helm chart ---------------------------------------------------------------
 
-chart-lint:
+chart-lint:  ## helm lint the chart.
 	helm lint helm/intelligence
 
 chart-template:
-	helm template icos-intelligence-ocei helm/intelligence
+	helm template icos-intelligence-ocei helm/intelligence -f helm/intelligence/ci/minimal-values.yaml
 
 # Render the chart against every CI overlay. Mirrors the `helm` job in
 # .github/workflows/ci.yml — keep the two in sync when adding overlays.
+# The bare-defaults case is intentionally excluded: the chart's
+# pre-flight guard rejects an empty tasks block by design.
 chart-template-matrix:
-	helm template icos-intelligence-ocei helm/intelligence
 	helm template icos-intelligence-ocei helm/intelligence -f helm/intelligence/ci/minimal-values.yaml
 	helm template icos-intelligence-ocei helm/intelligence -f helm/intelligence/ci/full-values.yaml
 
@@ -160,7 +168,7 @@ chart-e2e-up:
 # it uses against compose, then run it. Both forwards are killed on
 # exit; the release stays up for `make chart-e2e-down` (mirrors how
 # `make e2e` leaves compose up for `make down-demo`).
-chart-e2e: chart-e2e-up
+chart-e2e: chart-e2e-up  ## kind-cluster end-to-end: chart install + Prom stack + smoke suite.
 	@bash -c 'set -e; \
 		kubectl port-forward svc/intelligence 3000:3000 >/dev/null 2>&1 & PF_I=$$!; \
 		kubectl port-forward svc/prometheus   9090:9090 >/dev/null 2>&1 & PF_P=$$!; \

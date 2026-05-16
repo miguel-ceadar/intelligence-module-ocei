@@ -60,7 +60,7 @@ The chart is published as an OCI artifact. Pin to a release version
 ```bash
 helm install icos-intelligence-ocei \
   oci://ghcr.io/miguel-ceadar/charts/icos-intelligence-ocei \
-  --version 0.1.0 \
+  --version 0.2.10 \
   -f your-values.yaml
 ```
 
@@ -78,7 +78,7 @@ docker run -d --name icos-intelligence-ocei \
   -e INTELLIGENCE_TELEMETRY__PROMETHEUS__ENDPOINT=https://prom.example.com \
   -v "$PWD/config.yaml:/etc/intelligence/config.yaml:ro" \
   -v intelligence-bentoml:/var/lib/bentoml \
-  ghcr.io/miguel-ceadar/icos-intelligence-ocei:0.1.0
+  ghcr.io/miguel-ceadar/icos-intelligence-ocei:0.2.10
 
 curl http://localhost:3000/healthz
 ```
@@ -103,23 +103,24 @@ your own Prometheus.
 
 ### Calling the API
 
-Train + predict on the bundled CSV sample — works without a Prometheus:
+Train + predict against the Prometheus you pointed the service at:
 
 ```bash
 curl -X POST http://localhost:3000/tasks/cpu_forecast_arima/train \
   -H 'Content-Type: application/json' \
-  -d '{"data_source": {"kind": "static", "name": "cpu_sample_dataset_orangepi.csv"}}'
+  -d '{"data_source": {"kind": "prometheus", "window": "24h", "step": "1m"}}'
 
 curl -X POST http://localhost:3000/tasks/cpu_forecast_arima/predict \
   -H 'Content-Type: application/json' \
   -d '{"input_series": {"cpu": [0.85]}}'
 ```
 
-Same call, training from a Prometheus window instead:
-
-```bash
-... -d '{"data_source": {"kind": "prometheus", "window": "24h", "step": "1m"}}'
-```
+The `data_source.kind` on the request must match the deployment's
+`telemetry.source` config (`prometheus` here). To train without a
+Prometheus, switch to `source: static` and pass a CSV name — see
+[`examples/cpu_forecast/README.md`](examples/cpu_forecast/README.md#try-it-in-static-mode)
+or just run `make e2e`, which spins up the bundled Prometheus +
+node-exporter.
 
 `cpu_forecast_xgb` and `cpu_forecast_lstm` expect a 6-value `input_series`
 window; `cpu_forecast_arima_drift` expects 12. Otherwise identical
@@ -135,7 +136,7 @@ Each task declares an input contract (feature count, window length,
 expected value range); mismatched requests get `422` before reaching
 the model. Predict serves `:latest` by default — pin a specific
 version via the request's `model_version` or the task config's
-`pinned_version` (request wins; see [Pretrained Bentos](#pretrained-bentos)
+`pinned_version` (request wins; see [Pretrained models](#pretrained-models)
 for the validation rules around pulled models).
 
 Predict requests accept an optional `horizon` (default `1`). The
@@ -165,9 +166,10 @@ intelligence:
   tasks:
     cpu_forecast_arima:
       kind: arima
-      feature: cpu
-      value_range: [0.0, 1.0]
       steps_back: 1
+      features:
+        - name: cpu
+          value_range: [0.0, 1.0]
 ```
 
 ### Prometheus
@@ -185,13 +187,17 @@ intelligence:
   tasks:
     cpu_forecast_arima:
       kind: arima
-      feature: cpu
-      value_range: [0.0, 1.0]
       steps_back: 1
-      query: 'avg(rate(node_cpu_seconds_total{mode="user"}[1m]))'
+      features:
+        - name: cpu
+          value_range: [0.0, 1.0]
+          query: 'avg(rate(node_cpu_seconds_total{mode="user"}[1m]))'
 ```
 
-Each task carries its own PromQL on the `query:` field. Train request
+Tasks declare their inputs under `features:` — the first entry is the
+target, any additional entries are covariates (XGB/LSTM consume them;
+ARIMA refuses multi-feature configs). Each feature carries its own
+PromQL on `query:` when `telemetry.source: prometheus`. Train request
 shape:
 
 ```bash
@@ -220,6 +226,26 @@ because an authenticated `POST /train` can otherwise redirect
 outbound traffic to arbitrary hosts (SSRF). Enable only for trusted
 clients.
 
+### Auth (bearer token on the HTTP API)
+
+Off by default — the smoke stack and local dev stay frictionless, and
+the service logs a `HTTP auth disabled` warning at startup. To require
+`Authorization: Bearer <token>` on `/train`, `/predict`, `/tasks` and
+friends, point the service at an env var holding the expected value:
+
+```yaml
+intelligence:
+  auth:
+    token_env: API_TOKEN
+```
+
+`/healthz`, `/readyz`, `/metrics`, and `/docs` stay open regardless so
+kubelet probes and API discovery still work without a credential. The
+Helm chart pairs this with `existingSecretName` for production
+deployments — see the
+[energy walkthrough](docs/energy-walkthrough.md#step-1--pre-create-the-secret)
+for the end-to-end recipe.
+
 ### Auto-train on startup
 
 Opt a task in to run its first training in the background as the
@@ -242,9 +268,11 @@ silently block startup.
 
 ### Retraining
 
-The service has no built-in scheduler. Point an external `CronJob` (or
-equivalent) at `POST /tasks/{task}/train` on whatever cadence suits
-the deployment.
+The library itself has no built-in scheduler. The Helm chart ships
+one — set `retraining.enabled: true` and list tasks under
+`retraining.tasks:` (see the [chart README](helm/intelligence/README.md#retraining)).
+For non-Kubernetes deployments, point any external cron at
+`POST /tasks/{task}/train`.
 
 ### Hugging Face push / pull
 
@@ -285,10 +313,11 @@ intelligence:
   tasks:
     mem_forecast_arima:
       kind: arima
-      feature: mem
-      value_range: [0.0, 1.0]
       steps_back: 1
-      query: '1 - (node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes)'
+      features:
+        - name: mem
+          value_range: [0.0, 1.0]
+          query: '1 - (node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes)'
 ```
 
 That's the whole change — no Python edits, no rebuild, no factory file.
@@ -298,15 +327,17 @@ memory, and energy forecasting end-to-end.
 
 ### Kind reference
 
-| `kind` | What it does | Required | Common optional |
-|---|---|---|---|
-| `arima` | Univariate forecast (single or multi-step, native 95 % CI) | `feature`, `query`† | `steps_back`, `value_range`, `model_params: {p, d, q}` |
-| `xgb` | Sliding-window forecast (recursive multi-step, no CI) | `feature`, `query`† | `steps_back` (window length, default 6), `value_range`, `model_params: {n_estimators, max_depth, eta, ...}` |
-| `lstm` | Sliding-window forecast (direct multi-step, PyTorch) | `feature`, `query`† | `steps_back`, `batch_size`, `horizon` (trained max, default 1), `model_params: {hidden_size, num_epochs, ...}` |
-| `drift` | NannyML univariate drift alerting on a chunk | `feature`, `forecaster` (name of a sibling task), `query`† | `chunk_size` (default 12), `value_range`, `metric` (default `jensen_shannon`) |
+Every task carries a `features:` list — the first entry is the
+target, additional entries are covariates. Each feature has `name`,
+optional `value_range: [lo, hi]`, and (for `telemetry.source:
+prometheus`) `query:`. Kind-specific knobs:
 
-† `query:` required when `telemetry.source: prometheus`; ignored for
-`static` (the train request body supplies the CSV name).
+| `kind` | What it does | Common optional |
+|---|---|---|
+| `arima` | Univariate forecast (single or multi-step, native 95 % CI) | `steps_back`, `model_params: {p, d, q}` |
+| `xgb` | Sliding-window forecast (recursive multi-step, no CI) | `steps_back` (window length, default 6), `model_params: {n_estimators, max_depth, eta, ...}` |
+| `lstm` | Sliding-window forecast (direct multi-step, PyTorch) | `steps_back`, `batch_size`, `horizon` (trained max, default 1), `model_params: {hidden_size, num_epochs, ...}` |
+| `drift` | NannyML univariate drift alerting on a chunk | `forecaster` (sibling task name, required), `chunk_size` (default 12), `metric` (default `jensen_shannon`) |
 
 ### Add a new model algorithm (lib-side change)
 

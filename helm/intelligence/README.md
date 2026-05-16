@@ -12,7 +12,7 @@ a release (`latest` drifts under you):
 ```bash
 helm install icos-intelligence-ocei \
   oci://ghcr.io/miguel-ceadar/charts/icos-intelligence-ocei \
-  --version 0.1.0 \
+  --version 0.2.10 \
   --set config.intelligence.telemetry.prometheus.endpoint=https://prom.example
 ```
 
@@ -22,7 +22,7 @@ Or with a local checkout + a values file:
 # values.prod.yaml
 image:
   repository: ghcr.io/miguel-ceadar/icos-intelligence-ocei
-  tag: "0.1.0"   # leave empty to follow .Chart.AppVersion
+  tag: ""   # empty falls back to .Chart.AppVersion (pin a specific tag in production)
 
 config:
   intelligence:

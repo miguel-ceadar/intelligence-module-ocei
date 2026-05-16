@@ -78,11 +78,12 @@ jobs:
       - name: Lint chart
         run: helm lint helm/intelligence
 
-      - name: Template chart (default values)
-        run: helm template icos-intelligence-ocei helm/intelligence
-
-      - name: Template chart (minimal — all toggles off)
+      # Default values.yaml ships `tasks: {}` and the deployment template
+      # refuses to render without at least one task (pre-flight guard).
+      # The two CI overlays each declare a single task so the matrix
+      # exercises the templates end-to-end.
+      - name: Template chart (minimal — single task, all toggles off)
         run: helm template icos-intelligence-ocei helm/intelligence -f helm/intelligence/ci/minimal-values.yaml
 
-      - name: Template chart (full — all toggles on)
+      - name: Template chart (full — single task, all toggles on)
         run: helm template icos-intelligence-ocei helm/intelligence -f helm/intelligence/ci/full-values.yaml

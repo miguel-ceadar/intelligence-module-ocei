@@ -2,6 +2,19 @@
 # in .github/workflows/ci.yml — the matrix proves the chart still
 # renders when conditionals collapse and no PVC/cronjob/PDB/etc. is
 # emitted. Not intended as a deployable values set.
+#
+# A single task block is declared below so the chart's "tasks must be
+# non-empty" pre-flight guard is satisfied (see deployment.yaml). The
+# task content itself doesn't render — it's just data in the ConfigMap.
+
+config:
+  intelligence:
+    tasks:
+      cpu_forecast_arima:
+        kind: arima
+        steps_back: 1
+        features:
+          - name: cpu
 
 persistence:
   enabled: false

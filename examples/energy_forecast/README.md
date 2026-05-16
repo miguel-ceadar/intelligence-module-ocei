@@ -1,9 +1,10 @@
 # Energy forecasting
 
-Same task kinds as `cpu_forecast/`, swapped onto an energy metric, useful as an example, details may differ in your exact setup. The
+Same task kinds as `cpu_forecast/`, swapped onto an energy metric. The
 shipped `config.yaml` defaults to a Kepler-based PromQL expression
-(eBPF energy attribution), but the model kinds don't care which
-exporter produces the watts, substitute the query with whatever one your stack already runs.
+(eBPF energy attribution); the model kinds don't care which exporter
+produces the watts, so substitute the query for whatever your stack
+already runs.
 
 | Task | Kind |
 |---|---|
@@ -56,7 +57,7 @@ docker run -d --name icos-intelligence-ocei \
   -e INTELLIGENCE_TELEMETRY__PROMETHEUS__ENDPOINT=https://your-prom \
   -v "$PWD/examples/energy_forecast/config.yaml:/etc/intelligence/config.yaml:ro" \
   -v intelligence-bentoml:/var/lib/bentoml \
-  ghcr.io/miguel-ceadar/icos-intelligence-ocei:0.2.2
+  ghcr.io/miguel-ceadar/icos-intelligence-ocei:0.2.10
 
 curl -X POST http://localhost:3000/tasks/energy_forecast_arima/train \
   -H 'Content-Type: application/json' \
