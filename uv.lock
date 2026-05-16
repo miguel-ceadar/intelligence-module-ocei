@@ -1059,7 +1059,7 @@ wheels = [
 
 [[package]]
 name = "icos-intelligence-ocei"
-version = "0.2.7"
+version = "0.2.10"
 source = { editable = "." }
 dependencies = [
     { name = "bentoml" },

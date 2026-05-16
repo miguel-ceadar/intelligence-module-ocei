@@ -16,10 +16,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
-
-def _stationary_cpu(n: int, mean: float = 0.5, std: float = 0.05, seed: int = 1) -> pd.DataFrame:
-    rng = np.random.default_rng(seed)
-    return pd.DataFrame({"cpu": rng.normal(mean, std, n).clip(0.0, 1.0)})
+from tests._synthetic import stationary_cpu
 
 
 def test_drift_model_advertises_drift_kind():
@@ -41,7 +38,7 @@ def test_drift_fit_returns_artifacts_and_metrics():
     from intelligence.ml.models.drift import DriftModel
 
     model = DriftModel(chunk_size=12, metric="jensen_shannon", forecaster_task_name="t_forecaster")
-    reference = _stationary_cpu(300)
+    reference = stationary_cpu(300)
     artifacts, metrics = model.fit({"reference_df": reference, "drift_columns": ["cpu"]})
 
     assert metrics["reference_size"] == 300
@@ -58,7 +55,7 @@ def test_drift_save_artifacts_writes_parquet_no_pickle(tmp_path):
     from intelligence.ml.models.drift import DriftModel
 
     model = DriftModel(chunk_size=12, metric="jensen_shannon")
-    artifacts, _ = model.fit({"reference_df": _stationary_cpu(300), "drift_columns": ["cpu"]})
+    artifacts, _ = model.fit({"reference_df": stationary_cpu(300), "drift_columns": ["cpu"]})
     files = model.save_artifacts(artifacts, tmp_path)
 
     assert files["reference"] == "reference.parquet"
@@ -74,7 +71,7 @@ def test_drift_save_artifacts_includes_input_spec_when_present(tmp_path):
     from intelligence.tasks.contracts import InputSpec
 
     model = DriftModel(chunk_size=12)
-    artifacts, _ = model.fit({"reference_df": _stationary_cpu(300), "drift_columns": ["cpu"]})
+    artifacts, _ = model.fit({"reference_df": stationary_cpu(300), "drift_columns": ["cpu"]})
     artifacts["input_spec"] = InputSpec(n_features=1, feature_names=["cpu"], steps_back=12)
     files = model.save_artifacts(artifacts, tmp_path)
 
@@ -89,7 +86,7 @@ def test_drift_load_artifacts_refits_calculator(tmp_path):
     from intelligence.ml.models.drift import DriftModel
 
     model = DriftModel(chunk_size=12, metric="jensen_shannon")
-    artifacts, _ = model.fit({"reference_df": _stationary_cpu(300), "drift_columns": ["cpu"]})
+    artifacts, _ = model.fit({"reference_df": stationary_cpu(300), "drift_columns": ["cpu"]})
     model.save_artifacts(artifacts, tmp_path)
     loaded = model.load_artifacts(tmp_path)
 
@@ -104,7 +101,7 @@ def test_drift_load_artifacts_restores_input_spec(tmp_path):
     from intelligence.tasks.contracts import InputSpec
 
     model = DriftModel(chunk_size=12)
-    artifacts, _ = model.fit({"reference_df": _stationary_cpu(300), "drift_columns": ["cpu"]})
+    artifacts, _ = model.fit({"reference_df": stationary_cpu(300), "drift_columns": ["cpu"]})
     artifacts["input_spec"] = InputSpec(n_features=1, feature_names=["cpu"], steps_back=12)
     model.save_artifacts(artifacts, tmp_path)
 
@@ -122,14 +119,14 @@ def test_drift_predict_returns_dict_on_similar_chunk(tmp_path):
     model = DriftModel(chunk_size=12, forecaster_task_name="t_forecaster")
     artifacts, _ = model.fit(
         {
-            "reference_df": _stationary_cpu(300, mean=0.5, std=0.05, seed=1),
+            "reference_df": stationary_cpu(300, mean=0.5, std=0.05, seed=1),
             "drift_columns": ["cpu"],
         }
     )
     model.save_artifacts(artifacts, tmp_path)
     loaded = model.load_artifacts(tmp_path)
 
-    similar = _stationary_cpu(12, mean=0.5, std=0.05, seed=2)
+    similar = stationary_cpu(12, mean=0.5, std=0.05, seed=2)
     result = model.predict(loaded, {"cpu": similar["cpu"].tolist()}, horizon=1)
 
     assert result["drift_detected"] is False
@@ -143,14 +140,14 @@ def test_drift_predict_flags_shifted_distribution(tmp_path):
     model = DriftModel(chunk_size=12)
     artifacts, _ = model.fit(
         {
-            "reference_df": _stationary_cpu(300, mean=0.5, std=0.05, seed=1),
+            "reference_df": stationary_cpu(300, mean=0.5, std=0.05, seed=1),
             "drift_columns": ["cpu"],
         }
     )
     model.save_artifacts(artifacts, tmp_path)
     loaded = model.load_artifacts(tmp_path)
 
-    shifted = _stationary_cpu(12, mean=0.9, std=0.02, seed=3)
+    shifted = stationary_cpu(12, mean=0.9, std=0.02, seed=3)
     result = model.predict(loaded, {"cpu": shifted["cpu"].tolist()})
     assert result["drift_detected"] is True
 
@@ -166,7 +163,7 @@ def test_drift_predict_ignores_horizon():
 
     from intelligence.ml.models.drift import DriftModel
 
-    reference = _stationary_cpu(300)
+    reference = stationary_cpu(300)
     calc = nml.UnivariateDriftCalculator(column_names=["cpu"], chunk_size=12).fit(
         reference[["cpu"]]
     )
@@ -178,7 +175,7 @@ def test_drift_predict_ignores_horizon():
         "forecaster_task_name": "",
     }
     model = DriftModel(chunk_size=12)
-    similar = _stationary_cpu(12, seed=2)
+    similar = stationary_cpu(12, seed=2)
     out_h1 = model.predict(artifacts, {"cpu": similar["cpu"].tolist()}, horizon=1)
     out_h7 = model.predict(artifacts, {"cpu": similar["cpu"].tolist()}, horizon=7)
     assert out_h1 == out_h7
@@ -197,7 +194,7 @@ def test_drift_predict_raises_when_input_columns_diverge_from_artifact(tmp_path)
     model = DriftModel(chunk_size=12)
     artifacts, _ = model.fit(
         {
-            "reference_df": _stationary_cpu(300),
+            "reference_df": stationary_cpu(300),
             "drift_columns": ["cpu"],  # artifact only knows about 'cpu'
         }
     )
@@ -209,7 +206,7 @@ def test_drift_predict_raises_when_input_columns_diverge_from_artifact(tmp_path)
     # here (no InputSpec) mimics the legacy-artifact path through
     # allow_unverified_models=True.
     with pytest.raises(ValueError, match=r"cpu"):
-        model.predict(loaded, {"mem": _stationary_cpu(12)["cpu"].tolist()})
+        model.predict(loaded, {"mem": stationary_cpu(12)["cpu"].tolist()})
 
 
 def test_make_drift_prepare_emits_reference_and_columns():
@@ -257,7 +254,7 @@ def test_drift_model_save_uses_only_allowed_extensions(tmp_path: Path):
     from intelligence.ml.models.drift import DriftModel
 
     model = DriftModel(chunk_size=12)
-    artifacts, _ = model.fit({"reference_df": _stationary_cpu(300), "drift_columns": ["cpu"]})
+    artifacts, _ = model.fit({"reference_df": stationary_cpu(300), "drift_columns": ["cpu"]})
     files = model.save_artifacts(artifacts, tmp_path)
     for role, fname in files.items():
         assert Path(fname).suffix.lower() in ALLOWED_EXTENSIONS, (

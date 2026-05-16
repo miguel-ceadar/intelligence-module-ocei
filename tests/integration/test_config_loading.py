@@ -7,7 +7,7 @@ from pathlib import Path
 import pytest
 from pydantic import ValidationError
 
-config = pytest.importorskip("intelligence.config")
+from intelligence import config
 
 
 @pytest.fixture

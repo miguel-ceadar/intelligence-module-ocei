@@ -1,18 +1,15 @@
-"""Wave 1 #2 — multi-horizon forecasting + confidence intervals.
+"""Multi-horizon forecasting + confidence intervals.
 
-Encodes the contract for the new API shape before any model adapter changes:
+Pins the API shape:
 
   - ``ForecastPoint`` (value, lower?, upper?) replaces the scalar ``prediction``.
   - ``PredictRequest.horizon: int = 1`` (validated ``>= 1``).
-  - ``PredictResponse.prediction`` is a list of ``ForecastPoint`` of length
-    ``horizon``. Drift tasks keep a dict-shaped prediction — that path is
-    unchanged.
-  - ``InputSpec.max_horizon: int | None`` lets a task bound the request horizon
-    (LSTM direct multi-output sets it to ``output_size``; ARIMA / XGB-recursive
-    leave it ``None`` = unbounded).
-
-Tests skip cleanly when a not-yet-shipped field is missing, so the suite stays
-green-with-skips during the journey.
+  - ``PredictResponse.prediction`` is ``list[ForecastPoint] | DriftPrediction``;
+    forecast tasks return the list, drift tasks return the model. The untagged
+    union resolves structurally (list vs object).
+  - ``InputSpec.max_horizon: int | None`` lets a task bound the request
+    horizon (LSTM direct multi-output sets it to ``output_size``; ARIMA /
+    XGB-recursive leave it ``None`` = unbounded).
 """
 
 from __future__ import annotations
@@ -20,22 +17,13 @@ from __future__ import annotations
 import pytest
 from pydantic import ValidationError
 
-from intelligence.api import schemas as api_schemas
+from intelligence.api.schemas import DriftPrediction, ForecastPoint, PredictRequest, PredictResponse
 from intelligence.tasks.contracts import InputSpec
-
-
-def _maybe(module, name: str):
-    obj = getattr(module, name, None)
-    if obj is None:
-        pytest.skip(f"{module.__name__}.{name} not implemented yet")
-    return obj
-
 
 # --- ForecastPoint ----------------------------------------------------------
 
 
 def test_forecast_point_schema_is_exported():
-    ForecastPoint = _maybe(api_schemas, "ForecastPoint")
     point = ForecastPoint(value=0.42)
     assert point.value == pytest.approx(0.42)
     assert point.lower is None
@@ -43,7 +31,6 @@ def test_forecast_point_schema_is_exported():
 
 
 def test_forecast_point_carries_optional_interval():
-    ForecastPoint = _maybe(api_schemas, "ForecastPoint")
     point = ForecastPoint(value=0.42, lower=0.30, upper=0.55)
     assert point.lower == pytest.approx(0.30)
     assert point.upper == pytest.approx(0.55)
@@ -53,34 +40,27 @@ def test_forecast_point_carries_optional_interval():
 
 
 def test_predict_request_horizon_defaults_to_one():
-    req = api_schemas.PredictRequest(input_series={"cpu": [0.5]})
-    if not hasattr(req, "horizon"):
-        pytest.skip("PredictRequest.horizon not implemented yet")
+    req = PredictRequest(input_series={"cpu": [0.5]})
     assert req.horizon == 1
 
 
 def test_predict_request_accepts_explicit_horizon():
-    if "horizon" not in api_schemas.PredictRequest.model_fields:
-        pytest.skip("PredictRequest.horizon not implemented yet")
-    req = api_schemas.PredictRequest(input_series={"cpu": [0.5]}, horizon=12)
+    req = PredictRequest(input_series={"cpu": [0.5]}, horizon=12)
     assert req.horizon == 12
 
 
 def test_predict_request_rejects_zero_or_negative_horizon():
-    if "horizon" not in api_schemas.PredictRequest.model_fields:
-        pytest.skip("PredictRequest.horizon not implemented yet")
     with pytest.raises(ValidationError):
-        api_schemas.PredictRequest(input_series={"cpu": [0.5]}, horizon=0)
+        PredictRequest(input_series={"cpu": [0.5]}, horizon=0)
     with pytest.raises(ValidationError):
-        api_schemas.PredictRequest(input_series={"cpu": [0.5]}, horizon=-3)
+        PredictRequest(input_series={"cpu": [0.5]}, horizon=-3)
 
 
 # --- PredictResponse list shape ---------------------------------------------
 
 
 def test_predict_response_carries_list_of_forecast_points():
-    ForecastPoint = _maybe(api_schemas, "ForecastPoint")
-    resp = api_schemas.PredictResponse(
+    resp = PredictResponse(
         prediction=[ForecastPoint(value=0.4), ForecastPoint(value=0.45, lower=0.4, upper=0.5)],
         model_version="abc123",
     )
@@ -93,12 +73,6 @@ def test_predict_response_carries_list_of_forecast_points():
 
 
 # --- DriftPrediction + PredictResponse union --------------------------------
-#
-# §5 maintainability: PredictResponse.prediction used to be ``Any`` so the
-# real forecast-vs-drift shape divergence stayed hidden from OpenAPI and
-# from any consumer relying on the response model. The honest schema is
-# ``list[ForecastPoint] | DriftPrediction``; an untagged union works because
-# a list and an object are structurally disjoint.
 
 
 def test_drift_prediction_schema_matches_runtime_dict():
@@ -106,7 +80,6 @@ def test_drift_prediction_schema_matches_runtime_dict():
     schema has to match the runtime contract so untagged-union coercion
     works without the caller having to instantiate the model itself.
     """
-    DriftPrediction = _maybe(api_schemas, "DriftPrediction")
     pred = DriftPrediction(
         drift_detected=True,
         n_chunks=3,
@@ -121,8 +94,7 @@ def test_predict_response_coerces_drift_dict_into_drift_prediction():
     """``BaseTask.predict`` builds ``PredictResponse(prediction=<drift dict>)``
     — pydantic must coerce the dict to ``DriftPrediction`` via the union.
     """
-    DriftPrediction = _maybe(api_schemas, "DriftPrediction")
-    resp = api_schemas.PredictResponse(
+    resp = PredictResponse(
         prediction={
             "drift_detected": False,
             "n_chunks": 1,
@@ -138,10 +110,8 @@ def test_predict_response_coerces_drift_dict_into_drift_prediction():
 def test_predict_response_rejects_unrelated_dict():
     """An object that's neither a list nor a drift shape should fail —
     the old ``Any`` schema accepted anything."""
-    if "DriftPrediction" not in dir(api_schemas):
-        pytest.skip("DriftPrediction not implemented yet")
     with pytest.raises(ValidationError):
-        api_schemas.PredictResponse(prediction={"unrelated": "data"}, model_version="x")
+        PredictResponse(prediction={"unrelated": "data"}, model_version="x")
 
 
 def test_openapi_advertises_real_response_models():
@@ -149,7 +119,8 @@ def test_openapi_advertises_real_response_models():
     ``PredictResponse`` and ``TrainResponse`` in the OpenAPI schema —
     consumers can generate clients against the real types instead of
     inferring shapes by trial-and-error."""
-    api_service = pytest.importorskip("intelligence.api.service")
+    from intelligence.api import service as api_service
+
     schema = api_service.app.openapi()
     predict = schema["paths"]["/tasks/{task_name}/predict"]["post"]
     train = schema["paths"]["/tasks/{task_name}/train"]["post"]
@@ -163,14 +134,10 @@ def test_openapi_advertises_real_response_models():
 
 
 def test_input_spec_max_horizon_defaults_to_none():
-    if "max_horizon" not in InputSpec.model_fields:
-        pytest.skip("InputSpec.max_horizon not implemented yet")
     spec = InputSpec(n_features=1, feature_names=["cpu"], steps_back=6)
     assert spec.max_horizon is None
 
 
 def test_input_spec_max_horizon_round_trips():
-    if "max_horizon" not in InputSpec.model_fields:
-        pytest.skip("InputSpec.max_horizon not implemented yet")
     spec = InputSpec(n_features=1, feature_names=["cpu"], steps_back=6, max_horizon=4)
     assert spec.max_horizon == 4

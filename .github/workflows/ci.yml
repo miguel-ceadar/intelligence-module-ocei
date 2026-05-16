@@ -54,11 +54,10 @@ jobs:
         # resolve our torch+cpu pin; running pip-audit directly
         # against the already-resolved env sidesteps that.
         #
-        # Fails on any finding. Suppress a CVE with no upstream fix by
-        # adding `--ignore-vuln <ID>` below.
-        run: |
-          uv run --with pip-audit pip-audit --skip-editable \
-            # --ignore-vuln GHSA-xxxx-yyyy-zzzz \
+        # Fails on any finding. To suppress a CVE with no upstream fix,
+        # append `--ignore-vuln GHSA-xxxx-yyyy-zzzz` to the command
+        # below (one flag per CVE).
+        run: uv run --with pip-audit pip-audit --skip-editable
 
   # Chart lint + template-matrix render. Runs in parallel with the Python
   # suite. The release workflow already does this before publishing, but

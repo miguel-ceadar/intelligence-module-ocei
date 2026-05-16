@@ -1,5 +1,5 @@
 """Train + predict roundtrip for ``ArimaModel``, including multi-horizon
-with confidence intervals (Wave 1 #2).
+with confidence intervals.
 
 Single-step predict was previously covered only by the API integration
 tests; this file pulls the contract into a focused unit test so multi-
@@ -12,11 +12,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
-
-def _synthetic_cpu(n: int = 120, seed: int = 3) -> pd.DataFrame:
-    rng = np.random.default_rng(seed)
-    walk = np.cumsum(rng.standard_normal(n) * 0.02) + 0.5
-    return pd.DataFrame({"timestamp": np.arange(n), "cpu": walk.clip(0.05, 0.95)})
+from tests._synthetic import cpu_walk
 
 
 def _components(df: pd.DataFrame) -> dict:
@@ -42,10 +38,9 @@ def test_arima_predict_multi_horizon_returns_list_of_forecast_points():
     ForecastPoint with a ``value`` plus 95 % CI bounds from
     ``get_forecast(steps=N)``.
     """
-    pytest.importorskip("statsmodels")
     from intelligence.ml.models.arima import ArimaModel
 
-    comps = _components(_synthetic_cpu(n=150))
+    comps = _components(cpu_walk(n=150))
     model = ArimaModel()
     artifacts, _ = model.fit(comps)
 
@@ -62,7 +57,7 @@ def test_arima_predict_horizon_one_returns_single_point():
     """``horizon=1`` is the default; predict returns a list of length 1."""
     from intelligence.ml.models.arima import ArimaModel
 
-    comps = _components(_synthetic_cpu(n=150))
+    comps = _components(cpu_walk(n=150))
     model = ArimaModel()
     artifacts, _ = model.fit(comps)
     out = model.predict(artifacts, {"cpu": [0.42]}, horizon=1)
@@ -83,7 +78,7 @@ def arima_artifacts_fit():
     """A fresh ``(model, artifacts, metrics)`` triple from ``ArimaModel.fit``."""
     from intelligence.ml.models.arima import ArimaModel
 
-    comps = _components(_synthetic_cpu(n=150))
+    comps = _components(cpu_walk(n=150))
     model = ArimaModel()
     artifacts, metrics = model.fit(comps)
     return model, artifacts, metrics

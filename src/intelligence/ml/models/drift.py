@@ -22,9 +22,10 @@ from typing import Any
 
 import pandas as pd
 
-logger = logging.getLogger(__name__)
+from intelligence.ml.artifact.sidecars import load_input_spec, load_json, save_input_spec, save_json
+from intelligence.utils.columns import TIMESTAMP_COLS
 
-_TIMESTAMP_COLS = {"time", "timestamp", "date"}
+logger = logging.getLogger(__name__)
 
 
 class DriftModel:
@@ -58,7 +59,7 @@ class DriftModel:
         reference_df: pd.DataFrame = components["reference_df"]
         column_names: list[str] = list(
             components.get("drift_columns")
-            or [c for c in reference_df.columns if c.lower() not in _TIMESTAMP_COLS]
+            or [c for c in reference_df.columns if c.lower() not in TIMESTAMP_COLS]
         )
         metrics = {"reference_size": len(reference_df)}
         artifacts = {
@@ -75,8 +76,6 @@ class DriftModel:
         """Persist the reference frame and config sidecar; return the
         ``role -> filename`` map for the manifest.
         """
-        from intelligence.ml.artifact.sidecars import save_input_spec, save_json
-
         ref: pd.DataFrame = artifacts["reference_df"]
         ref.to_parquet(dest / "reference.parquet")
         save_json(
@@ -118,8 +117,6 @@ class DriftModel:
             import nannyml as nml
         except ImportError as e:  # pragma: no cover — import gate
             raise ImportError("drift task requires the `nannyml` package") from e
-
-        from intelligence.ml.artifact.sidecars import load_input_spec, load_json
 
         ref = pd.read_parquet(src / "reference.parquet")
         config = load_json(src, "drift.json")
@@ -199,7 +196,7 @@ def make_drift_prepare(value_col: str | None = None) -> Callable[[pd.DataFrame],
     """
 
     def prepare(df: pd.DataFrame) -> dict:
-        cols = [c for c in df.columns if c.lower() not in _TIMESTAMP_COLS]
+        cols = [c for c in df.columns if c.lower() not in TIMESTAMP_COLS]
         if value_col is not None:
             if value_col not in cols:
                 raise ValueError(f"value_col {value_col!r} not in dataset; available: {cols}")

@@ -120,19 +120,15 @@ def test_xgb_model_params_accept_unknown_xgboost_field():
 
 
 def test_lstm_horizon_defaults_to_one():
-    """Wave 1 #2: LSTM tasks carry a top-level ``horizon`` field that
-    becomes both ``output_size`` (at train) and ``max_horizon`` (in the
-    contract). Defaults to 1 so single-step deployments stay unchanged."""
-    if "horizon" not in LstmTaskConfig.model_fields:
-        pytest.skip("LstmTaskConfig.horizon not implemented yet")
+    """LSTM tasks carry a top-level ``horizon`` field that becomes both
+    ``output_size`` (at train) and ``max_horizon`` (in the contract).
+    Defaults to 1 so single-step deployments stay unchanged."""
     cfg = _parse({"kind": "lstm", "features": [{"name": "cpu"}]})
     assert isinstance(cfg, LstmTaskConfig)
     assert cfg.horizon == 1
 
 
 def test_lstm_horizon_overrides_default():
-    if "horizon" not in LstmTaskConfig.model_fields:
-        pytest.skip("LstmTaskConfig.horizon not implemented yet")
     cfg = _parse({"kind": "lstm", "features": [{"name": "cpu"}], "horizon": 6})
     assert isinstance(cfg, LstmTaskConfig)
     assert cfg.horizon == 6

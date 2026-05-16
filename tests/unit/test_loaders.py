@@ -12,8 +12,8 @@ from intelligence.api.schemas import StaticDataSource
 
 
 def test_default_prepare_produces_legacy_components(samples_dir):
-    """The default prepare callable must match what phase-1's loader produced:
-    a univariate split + MinMax-scaled X_train/X_test/y_train/y_test/scaler_obj.
+    """The default prepare callable produces a univariate split +
+    MinMax-scaled X_train/X_test/y_train/y_test/scaler_obj.
     """
     from intelligence.tasks.loaders import static_csv_loader
 

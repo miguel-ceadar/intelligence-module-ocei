@@ -26,7 +26,7 @@ def build_drift_task(
     if importlib.util.find_spec("nannyml") is None:
         raise ImportError(
             f"drift task {name!r} requires the optional `nannyml` package; "
-            f"install with `pip install intelligence-module-ocei[drift]` "
+            f"install with `pip install icos-intelligence-ocei[drift]` "
             f"(or `uv sync --extra drift`)"
         )
 

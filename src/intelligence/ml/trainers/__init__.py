@@ -6,7 +6,7 @@ that prepares components and calls one of these.
 """
 
 from intelligence.ml.trainers.base import ModelTrainer, TimeSeriesDataset
-from intelligence.ml.trainers.lstm import LighterStudentLSTMModel, LSTMModel
+from intelligence.ml.trainers.lstm import LSTMModel
 from intelligence.ml.trainers.metrics import (
     metrics,
     metrics_pytorch,
@@ -16,7 +16,6 @@ from intelligence.ml.trainers.metrics import (
 
 __all__ = [
     "LSTMModel",
-    "LighterStudentLSTMModel",
     "ModelTrainer",
     "TimeSeriesDataset",
     "metrics",

@@ -25,7 +25,7 @@ class TelemetrySource(Protocol):
 
     ``query`` interpretation is source-specific:
       - ``StaticSource``: CSV filename, relative to the configured base dir.
-      - ``PrometheusSource`` (phase-2 §3.2): PromQL expression.
+      - ``PrometheusSource``: PromQL expression.
 
     ``start`` / ``end`` / ``step`` are required for time-windowed sources
     (Prometheus) and ignored by sources that return a fixed dataset

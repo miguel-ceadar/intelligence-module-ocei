@@ -10,22 +10,16 @@ the test stays under a couple of seconds. Verifies:
 from __future__ import annotations
 
 import numpy as np
-import pandas as pd
 import pytest
 
-
-def _synthetic_cpu(n: int = 200, seed: int = 11) -> pd.DataFrame:
-    rng = np.random.default_rng(seed)
-    walk = np.cumsum(rng.standard_normal(n) * 0.02) + 0.5
-    return pd.DataFrame({"timestamp": np.arange(n), "cpu": walk.clip(0.05, 0.95)})
+from tests._synthetic import correlated_multivariate, cpu_walk
 
 
 def test_make_lstm_prepare_yields_3d_tensors():
-    pytest.importorskip("torch")
     from intelligence.ml.models.lstm import make_lstm_prepare
 
     prep = make_lstm_prepare(look_back=5, feature_names=["cpu"], batch_size=8)
-    comps = prep(_synthetic_cpu())
+    comps = prep(cpu_walk())
 
     for key in (
         "X_train",
@@ -48,7 +42,6 @@ def test_make_lstm_prepare_yields_3d_tensors():
 def test_lstm_predict_rejects_short_window():
     """Contract test — no training, just construct minimal artefacts
     and assert predict rejects windows shorter than ``look_back``."""
-    pytest.importorskip("torch")
     from sklearn.preprocessing import MinMaxScaler
 
     from intelligence.ml.models.lstm import LstmModel
@@ -68,12 +61,11 @@ def test_lstm_predict_multi_horizon():
     """LSTM is direct multi-output — ``output_size`` is set at train
     time and equals the maximum horizon predict can serve.
     """
-    pytest.importorskip("torch")
     from intelligence.ml.models.lstm import LstmModel, make_lstm_prepare
 
     horizon = 3
     prep = make_lstm_prepare(look_back=6, feature_names=["cpu"], batch_size=16, horizon=horizon)
-    comps = prep(_synthetic_cpu(n=300))
+    comps = prep(cpu_walk(n=300))
     comps["model_parameters"] = {
         "input_size": 1,
         "output_size": horizon,
@@ -87,7 +79,7 @@ def test_lstm_predict_multi_horizon():
 
     out = model.predict(
         artifacts,
-        {"cpu": _synthetic_cpu(n=8).iloc[-6:]["cpu"].tolist()},
+        {"cpu": cpu_walk(n=8).iloc[-6:]["cpu"].tolist()},
         horizon=horizon,
     )
     assert isinstance(out, list) and len(out) == horizon
@@ -99,7 +91,6 @@ def test_lstm_predict_multi_horizon():
 
 def test_lstm_predict_rejects_horizon_greater_than_trained_output_size():
     """LSTM is direct — request horizon > trained output_size is a 422."""
-    pytest.importorskip("torch")
     from sklearn.preprocessing import MinMaxScaler
 
     from intelligence.ml.models.lstm import LstmModel
@@ -126,11 +117,10 @@ def lstm_artifacts_fit():
 
     Tiny network + 2 epochs keeps the test in the seconds range.
     """
-    pytest.importorskip("torch")
     from intelligence.ml.models.lstm import LstmModel, make_lstm_prepare
 
     prep = make_lstm_prepare(look_back=6, feature_names=["cpu"], batch_size=16)
-    comps = prep(_synthetic_cpu(n=300))
+    comps = prep(cpu_walk(n=300))
     comps["model_parameters"] = {
         "input_size": 1,
         "output_size": 1,
@@ -254,7 +244,7 @@ def test_lstm_prepare_selects_features_by_name_not_position():
     """
     from intelligence.ml.models.lstm import make_lstm_prepare
 
-    df = _synthetic_multivariate(n=300)
+    df = correlated_multivariate(n=300)
     df = df[["timestamp", "load", "mem", "cpu"]]
 
     prep = make_lstm_prepare(
@@ -274,34 +264,22 @@ def test_lstm_prepare_raises_on_missing_feature_name():
     """Typo'd feature name fails the prepare loudly."""
     from intelligence.ml.models.lstm import make_lstm_prepare
 
-    df = _synthetic_multivariate(n=120)
+    df = correlated_multivariate(n=120)
     prep = make_lstm_prepare(look_back=4, feature_names=["cpuuuu"], batch_size=8, horizon=1)
     with pytest.raises(ValueError, match="cpuuuu"):
         prep(df)
-
-
-def _synthetic_multivariate(n: int = 300, seed: int = 17) -> pd.DataFrame:
-    """Two correlated series — cpu drives memory with a one-step lag —
-    plus a noisy unrelated covariate. Forecasting cpu (target) should
-    work whether or not we include the covariates."""
-    rng = np.random.default_rng(seed)
-    cpu = (np.cumsum(rng.standard_normal(n) * 0.02) + 0.5).clip(0.05, 0.95)
-    mem = np.roll(cpu, 1) + rng.standard_normal(n) * 0.01
-    load = rng.standard_normal(n) * 0.1 + 0.3
-    return pd.DataFrame({"timestamp": np.arange(n), "cpu": cpu, "mem": mem, "load": load})
 
 
 @pytest.mark.slow
 def test_lstm_prepare_multivariate_emits_target_only_y():
     """Multivariate input, single-target output. y shape is
     ``(samples, horizon)`` regardless of how many input vars."""
-    pytest.importorskip("torch")
     from intelligence.ml.models.lstm import make_lstm_prepare
 
     prep = make_lstm_prepare(
         look_back=6, feature_names=["cpu", "mem", "load"], batch_size=16, horizon=2
     )
-    comps = prep(_synthetic_multivariate())
+    comps = prep(correlated_multivariate())
 
     assert comps["X_train"].shape[2] == 3  # num_variables in input
     assert comps["y_train"].shape[1] == 2  # horizon only — target alone
@@ -314,14 +292,13 @@ def test_lstm_prepare_multivariate_emits_target_only_y():
 def test_lstm_multivariate_train_and_predict_roundtrip():
     """Train an LSTM on three inputs, predict the target. The covariates
     flow through scaler_X; only the target comes back from predict."""
-    pytest.importorskip("torch")
     from intelligence.ml.models.lstm import LstmModel, make_lstm_prepare
 
     horizon = 2
     prep = make_lstm_prepare(
         look_back=6, feature_names=["cpu", "mem", "load"], batch_size=16, horizon=horizon
     )
-    comps = prep(_synthetic_multivariate(n=300))
+    comps = prep(correlated_multivariate(n=300))
     comps["model_parameters"] = {
         "input_size": 3,  # num_variables
         "output_size": horizon,
@@ -334,7 +311,7 @@ def test_lstm_multivariate_train_and_predict_roundtrip():
     assert artifacts["num_variables"] == 3
     assert artifacts["output_size"] == horizon
 
-    fresh = _synthetic_multivariate(n=8, seed=42)
+    fresh = correlated_multivariate(n=8, seed=42)
     out = model.predict(
         artifacts,
         {

@@ -4,7 +4,7 @@
 # Prometheus. See the README.
 #
 # Covers both univariate (cpu alone) and multivariate (cpu + memory)
-# tasks so `make e2e` exercises the full Phase 3 surface.
+# tasks so `make e2e` exercises both forecast shapes plus drift.
 
 intelligence:
   telemetry:
@@ -52,7 +52,7 @@ intelligence:
           value_range: [0.0, 1.0]
           query: 'avg(rate(node_cpu_seconds_total{mode!="idle"}[30s]))'
 
-    # ---- Multivariate (Phase 3) -----------------------------------------
+    # ---- Multivariate ---------------------------------------------------
     # Target = cpu; memory is an exogenous covariate. Same PromQL strings
     # as the univariate tasks above so we don't add scrape pressure on
     # the demo node-exporter.

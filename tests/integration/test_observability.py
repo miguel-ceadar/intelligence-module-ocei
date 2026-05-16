@@ -6,16 +6,15 @@ import json
 import logging
 
 import pytest
+from fastapi.testclient import TestClient
+
+from intelligence.api import service as api
 
 pytestmark = pytest.mark.integration
-
-api = pytest.importorskip("intelligence.api.service")
 
 
 @pytest.fixture
 def client():
-    from fastapi.testclient import TestClient
-
     return TestClient(api.app)
 
 

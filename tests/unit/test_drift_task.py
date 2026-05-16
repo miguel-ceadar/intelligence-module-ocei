@@ -21,11 +21,7 @@ from intelligence.api.schemas import (
     StaticDataSource,
     TrainRequest,
 )
-
-
-def _stationary_cpu(n: int, mean: float = 0.5, std: float = 0.05, seed: int = 1) -> pd.DataFrame:
-    rng = np.random.default_rng(seed)
-    return pd.DataFrame({"cpu": rng.normal(mean, std, n).clip(0.0, 1.0)})
+from tests._synthetic import stationary_cpu
 
 
 def _drift_task(reference_df: pd.DataFrame, **drift_model_kwargs):
@@ -58,7 +54,7 @@ def _drift_task(reference_df: pd.DataFrame, **drift_model_kwargs):
 
 def test_drift_train_saves_bento_with_calculator(tmp_path, monkeypatch):
     monkeypatch.setenv("BENTOML_HOME", str(tmp_path / "bentoml"))
-    reference = _stationary_cpu(300)
+    reference = stationary_cpu(300)
     task = _drift_task(reference)
 
     result = task.train(
@@ -77,7 +73,7 @@ def test_drift_train_saves_bento_with_calculator(tmp_path, monkeypatch):
 
 def test_drift_predict_on_similar_chunk_reports_no_drift(tmp_path, monkeypatch):
     monkeypatch.setenv("BENTOML_HOME", str(tmp_path / "bentoml"))
-    reference = _stationary_cpu(300, mean=0.5, std=0.05, seed=1)
+    reference = stationary_cpu(300, mean=0.5, std=0.05, seed=1)
     task = _drift_task(reference)
     task.train(
         TrainRequest(
@@ -87,14 +83,14 @@ def test_drift_predict_on_similar_chunk_reports_no_drift(tmp_path, monkeypatch):
     )
 
     # Same distribution as reference — should not alert.
-    similar_chunk = _stationary_cpu(12, mean=0.5, std=0.05, seed=2)
+    similar_chunk = stationary_cpu(12, mean=0.5, std=0.05, seed=2)
     resp = task.predict(PredictRequest(input_series={"cpu": similar_chunk["cpu"].tolist()}))
     assert resp.prediction.drift_detected is False
 
 
 def test_drift_predict_on_shifted_chunk_reports_drift(tmp_path, monkeypatch):
     monkeypatch.setenv("BENTOML_HOME", str(tmp_path / "bentoml"))
-    reference = _stationary_cpu(300, mean=0.5, std=0.05, seed=1)
+    reference = stationary_cpu(300, mean=0.5, std=0.05, seed=1)
     task = _drift_task(reference)
     task.train(
         TrainRequest(
@@ -104,7 +100,7 @@ def test_drift_predict_on_shifted_chunk_reports_drift(tmp_path, monkeypatch):
     )
 
     # Strongly shifted distribution (mean 0.5 -> 0.9, much tighter std).
-    shifted_chunk = _stationary_cpu(12, mean=0.9, std=0.02, seed=3)
+    shifted_chunk = stationary_cpu(12, mean=0.9, std=0.02, seed=3)
     resp = task.predict(PredictRequest(input_series={"cpu": shifted_chunk["cpu"].tolist()}))
     assert resp.prediction.drift_detected is True
 

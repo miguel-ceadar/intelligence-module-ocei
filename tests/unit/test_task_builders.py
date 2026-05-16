@@ -108,8 +108,8 @@ def test_lstm_builder_carries_batch_size_into_prepare(prom_cfg):
 
 
 def test_lstm_builder_propagates_horizon_to_output_size_and_max_horizon(prom_cfg):
-    """Wave 1 #2: an LSTM task's ``horizon:`` config field drives both
-    the trained ``output_size`` and the ``InputSpec.max_horizon`` clamp.
+    """An LSTM task's ``horizon:`` config field drives both the trained
+    ``output_size`` and the ``InputSpec.max_horizon`` clamp.
     """
     from intelligence.config.settings import LstmTaskConfig
     from intelligence.tasks.contracts import InputSpec

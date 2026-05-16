@@ -14,8 +14,7 @@ from pathlib import Path
 import pandas as pd
 
 from intelligence.data import SAMPLES_DIR
-
-_TIMESTAMP_COLS = {"time", "timestamp", "date"}
+from intelligence.utils.columns import TIMESTAMP_COLS
 
 
 class StaticSource:
@@ -44,7 +43,7 @@ class StaticSource:
         # windows along the row axis. Out-of-order CSVs silently produce
         # straddled splits; sort here so the row-position invariant
         # holds without each prepare having to re-sort.
-        ts_col = next((c for c in df.columns if c.lower() in _TIMESTAMP_COLS), None)
+        ts_col = next((c for c in df.columns if c.lower() in TIMESTAMP_COLS), None)
         if ts_col is not None:
             df = df.sort_values(ts_col, kind="mergesort").reset_index(drop=True)
         return df

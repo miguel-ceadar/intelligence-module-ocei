@@ -1,4 +1,4 @@
-"""Phase-1 §2.3: per-task endpoints replace the mega ``/predict``.
+"""Per-task HTTP endpoints.
 
 Routes:
     GET    /healthz
@@ -6,46 +6,27 @@ Routes:
     GET    /tasks
     POST   /tasks/{task}/train
     POST   /tasks/{task}/predict
-    POST   /tasks/{task}/drift           (404 if task lacks drift support)
     GET    /models
     DELETE /models/{tag}
     POST   /models/sync
 
-Tests use the BentoML service's ASGI app via ``httpx`` so no subprocess
+Tests use the FastAPI app via ``httpx``'s TestClient so no subprocess
 boot is required.
 """
 
 from __future__ import annotations
 
 import pytest
+from fastapi.testclient import TestClient
+
+from intelligence.api import service as api
 
 pytestmark = pytest.mark.integration
 
-api = pytest.importorskip("intelligence.api.service", reason="phase-1 §2.3 pending")
-pytest.importorskip("fastapi")  # TestClient lives here
-
 
 @pytest.fixture
-def app():
-    # Prefer the FastAPI app directly when exported (faster + simpler than
-    # going through the bentoml.Service ASGI wrapper).
-    fastapi_app = getattr(api, "app", None)
-    if fastapi_app is not None:
-        return fastapi_app
-    svc = getattr(api, "svc", None) or getattr(api, "build_service", lambda: None)()
-    if svc is None:
-        pytest.skip("intelligence.api.service.{app,svc} not implemented yet")
-    asgi = getattr(svc, "asgi_app", None)
-    if asgi is None:
-        pytest.skip("BentoML version does not expose `svc.asgi_app`; revise harness")
-    return asgi
-
-
-@pytest.fixture
-def client(app):
-    from fastapi.testclient import TestClient
-
-    return TestClient(app)
+def client():
+    return TestClient(api.app)
 
 
 def test_healthz(client):
@@ -99,13 +80,9 @@ def test_unknown_task_returns_404(client):
 
 
 def test_predict_input_spec_mismatch_returns_422(client):
-    """Wrong feature count or steps_back should produce a 4xx (ideally 422),
-    not a 500 from a numpy shape error inside the runner.
-
-    Pre-task-#11 (no InputSpec validation) the request hits a
-    model-not-found path and gets 503 — also a real 4xx/5xx answer, not
-    a crash. Once #11 lands, validation rejects pre-load and the
-    response narrows to 422.
+    """Wrong feature count or steps_back gets rejected by the InputSpec
+    validator before the artifact load — 422, not a deeper 500 from a
+    numpy shape error.
     """
     resp = client.post(
         "/tasks/cpu_forecast_arima/predict",
@@ -151,19 +128,6 @@ def test_train_endpoint_rejects_unknown_data_source_kind(client):
     if resp.status_code == 404:
         pytest.skip("cpu_forecast_arima task not registered in this config")
     assert resp.status_code == 422
-
-
-def test_train_endpoint_prometheus_kind_unimplemented_in_phase_1(client):
-    """``kind: "prometheus"`` is the phase-2 add. Phase 1 should refuse
-    cleanly (501 Not Implemented or 422), not pretend to work."""
-    body = {
-        "data_source": {"kind": "prometheus", "window": "24h", "step": "1m"},
-        "model_parameters": {},
-    }
-    resp = client.post("/tasks/cpu_forecast_arima/train", json=body)
-    if resp.status_code == 404:
-        pytest.skip("cpu_forecast_arima task not registered in this config")
-    assert resp.status_code in (501, 422), resp.text
 
 
 def test_train_endpoint_maps_upstream_prometheus_failure_to_502(client):

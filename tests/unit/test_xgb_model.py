@@ -14,18 +14,14 @@ import numpy as np
 import pandas as pd
 import pytest
 
-
-def _synthetic_cpu(n: int = 120, seed: int = 7) -> pd.DataFrame:
-    rng = np.random.default_rng(seed)
-    walk = np.cumsum(rng.standard_normal(n) * 0.02) + 0.5
-    return pd.DataFrame({"timestamp": np.arange(n), "cpu": walk.clip(0.05, 0.95)})
+from tests._synthetic import correlated_multivariate, cpu_walk
 
 
 def test_make_xgb_prepare_yields_expected_components():
     from intelligence.ml.models.xgb import make_xgb_prepare
 
     prep = make_xgb_prepare(look_back=4, feature_names=["cpu"])
-    comps = prep(_synthetic_cpu())
+    comps = prep(cpu_walk())
 
     for key in ("X_train", "X_test", "y_train", "y_test", "scaler_obj", "scaler_X", "look_back"):
         assert key in comps, f"missing component: {key}"
@@ -62,12 +58,12 @@ def test_xgb_predict_recursive_multi_horizon():
     from intelligence.ml.models.xgb import XgbModel, make_xgb_prepare
 
     prep = make_xgb_prepare(look_back=6, feature_names=["cpu"])
-    comps = prep(_synthetic_cpu(n=200))
+    comps = prep(cpu_walk(n=200))
     comps["model_parameters"] = {"n_estimators": 20}
     model = XgbModel()
     artifacts, _ = model.fit(comps)
 
-    window = _synthetic_cpu(n=8).iloc[-6:]["cpu"].tolist()
+    window = cpu_walk(n=8).iloc[-6:]["cpu"].tolist()
     out = model.predict(artifacts, {"cpu": window}, horizon=4)
     assert isinstance(out, list) and len(out) == 4
     for point in out:
@@ -80,13 +76,13 @@ def test_xgb_predict_horizon_one_returns_single_element_list():
     from intelligence.ml.models.xgb import XgbModel, make_xgb_prepare
 
     prep = make_xgb_prepare(look_back=6, feature_names=["cpu"])
-    comps = prep(_synthetic_cpu(n=200))
+    comps = prep(cpu_walk(n=200))
     comps["model_parameters"] = {"n_estimators": 20}
     model = XgbModel()
     artifacts, _ = model.fit(comps)
     out = model.predict(
         artifacts,
-        {"cpu": _synthetic_cpu(n=8).iloc[-6:]["cpu"].tolist()},
+        {"cpu": cpu_walk(n=8).iloc[-6:]["cpu"].tolist()},
         horizon=1,
     )
     assert isinstance(out, list) and len(out) == 1
@@ -101,7 +97,7 @@ def xgb_artifacts_fit():
     from intelligence.ml.models.xgb import XgbModel, make_xgb_prepare
 
     prep = make_xgb_prepare(look_back=6, feature_names=["cpu"])
-    comps = prep(_synthetic_cpu(n=200))
+    comps = prep(cpu_walk(n=200))
     comps["model_parameters"] = {"n_estimators": 20, "max_depth": 3, "eta": 0.1}
     model = XgbModel()
     artifacts, metrics = model.fit(comps)
@@ -214,16 +210,6 @@ def test_xgb_files_map_declares_only_safe_extensions(xgb_artifacts_fit, tmp_path
         )
 
 
-def _synthetic_multivariate(n: int = 200, seed: int = 19) -> pd.DataFrame:
-    """CPU drives memory with a lag; load is independent noise. Target =
-    cpu (first column)."""
-    rng = np.random.default_rng(seed)
-    cpu = (np.cumsum(rng.standard_normal(n) * 0.02) + 0.5).clip(0.05, 0.95)
-    mem = np.roll(cpu, 1) + rng.standard_normal(n) * 0.01
-    load = rng.standard_normal(n) * 0.1 + 0.3
-    return pd.DataFrame({"timestamp": np.arange(n), "cpu": cpu, "mem": mem, "load": load})
-
-
 def test_xgb_prepare_selects_features_by_name_not_position():
     """``feature_names`` is the canonical order — target first. If the
     upstream DataFrame's columns are in a different order (a CSV with
@@ -234,7 +220,7 @@ def test_xgb_prepare_selects_features_by_name_not_position():
     """
     from intelligence.ml.models.xgb import make_xgb_prepare
 
-    df = _synthetic_multivariate(n=200)
+    df = correlated_multivariate(n=200)
     # Reverse the non-timestamp columns: now positional pick = 'load'
     # but feature_names says target is 'cpu'.
     df = df[["timestamp", "load", "mem", "cpu"]]
@@ -261,7 +247,7 @@ def test_xgb_prepare_raises_on_missing_feature_name():
     prepare time with a clear message, not silently mistrain."""
     from intelligence.ml.models.xgb import make_xgb_prepare
 
-    df = _synthetic_multivariate(n=120)
+    df = correlated_multivariate(n=120)
     prep = make_xgb_prepare(look_back=4, feature_names=["cpuuuu"])
     with pytest.raises(ValueError, match="cpuuuu"):
         prep(df)
@@ -273,13 +259,13 @@ def test_xgb_multivariate_train_and_predict_roundtrip():
     from intelligence.ml.models.xgb import XgbModel, make_xgb_prepare
 
     prep = make_xgb_prepare(look_back=6, feature_names=["cpu", "mem", "load"])
-    comps = prep(_synthetic_multivariate(n=200))
+    comps = prep(correlated_multivariate(n=200))
     comps["model_parameters"] = {"n_estimators": 20}
     model = XgbModel()
     artifacts, _ = model.fit(comps)
     assert artifacts["num_variables"] == 3
 
-    fresh = _synthetic_multivariate(n=8, seed=101)
+    fresh = correlated_multivariate(n=8, seed=101)
     out = model.predict(
         artifacts,
         {

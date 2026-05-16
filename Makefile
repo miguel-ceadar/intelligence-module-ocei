@@ -1,4 +1,4 @@
-.PHONY: install install-dev install-legacy lint format test test-fast test-integration clean \
+.PHONY: install install-dev lint format test test-fast test-integration clean \
         up-demo down-demo logs-demo smoke e2e stress e2e-stress \
         up-dev down-dev logs-dev e2e-dev e2e-stress-dev \
         chart-lint chart-template chart-template-matrix \
@@ -15,9 +15,6 @@ install:
 
 install-dev:
 	pip install -e ".[dev]"
-
-install-legacy:
-	pip install -e ".[dev,legacy]"
 
 lint:
 	ruff check src tests

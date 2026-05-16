@@ -32,6 +32,7 @@ from sklearn.preprocessing import MinMaxScaler
 
 from intelligence.api.schemas import PrometheusDataSource, StaticDataSource
 from intelligence.telemetry import PrometheusSource, StaticSource, TelemetrySource
+from intelligence.utils.columns import TIMESTAMP_COLS
 
 if TYPE_CHECKING:
     from intelligence.config.settings import IntelligenceConfig
@@ -493,9 +494,6 @@ def _autodetect_value_column(df: pd.DataFrame) -> str:
     raise ValueError(f"no numeric column found in dataset; columns={list(df.columns)}")
 
 
-_TIMESTAMP_COLS = {"time", "timestamp", "date"}
-
-
 def _select_value_columns(df: pd.DataFrame, value_cols: list[str]) -> pd.DataFrame:
     """Normalise a multi-column DataFrame to the given value columns.
 
@@ -512,7 +510,7 @@ def _select_value_columns(df: pd.DataFrame, value_cols: list[str]) -> pd.DataFra
     """
     available = list(df.columns)
     available_lower = {c.lower(): c for c in available}
-    ts_col = next((c for c in available if c.lower() in _TIMESTAMP_COLS), None)
+    ts_col = next((c for c in available if c.lower() in TIMESTAMP_COLS), None)
 
     keep: list[str] = [ts_col] if ts_col else []
     renames: dict[str, str] = {}

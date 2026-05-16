@@ -24,13 +24,7 @@ from intelligence.config.settings import (
 )
 
 
-def _maybe_field(model, name: str):
-    if name not in model.model_fields:
-        pytest.skip(f"{model.__name__}.{name} not implemented yet")
-
-
 def test_prometheus_data_source_accepts_optional_endpoint_override():
-    _maybe_field(PrometheusDataSource, "endpoint")
     desc = PrometheusDataSource(
         kind="prometheus",
         window="1h",
@@ -41,14 +35,12 @@ def test_prometheus_data_source_accepts_optional_endpoint_override():
 
 
 def test_prometheus_data_source_endpoint_defaults_to_none():
-    _maybe_field(PrometheusDataSource, "endpoint")
     desc = PrometheusDataSource(kind="prometheus", window="1h", step="1m")
     assert desc.endpoint is None
 
 
 def test_telemetry_config_allow_endpoint_override_defaults_off():
     """Off by default — SSRF defense. Pilots flip it on per deployment."""
-    _maybe_field(TelemetryConfig, "allow_endpoint_override")
     cfg = TelemetryConfig(
         source="prometheus",
         prometheus=PrometheusConfig(endpoint="http://prom:9090"),
@@ -60,8 +52,6 @@ def test_loader_rejects_override_when_flag_off():
     """Sending ``data_source.endpoint`` without flipping the flag is a
     ``ValueError`` (which the API translates to 422 — the same shape as
     any other invalid request)."""
-    _maybe_field(PrometheusDataSource, "endpoint")
-    _maybe_field(TelemetryConfig, "allow_endpoint_override")
     from intelligence.tasks.loaders import build_loader_for_task
 
     cfg = IntelligenceConfig(
@@ -85,8 +75,6 @@ def test_loader_rejects_override_when_flag_off():
 def test_loader_uses_override_when_flag_on(monkeypatch):
     """Flag on + request endpoint set: the loader builds a one-shot source
     against the override. The configured auth + tls settings carry over."""
-    _maybe_field(PrometheusDataSource, "endpoint")
-    _maybe_field(TelemetryConfig, "allow_endpoint_override")
     from intelligence.tasks.loaders import build_loader_for_task
 
     monkeypatch.setenv("PROM_TOKEN", "token-value")
@@ -150,8 +138,6 @@ def test_loader_rejects_ssrf_targets_even_when_flag_on(bad_url, reason):
     """The override flag is meant for trusted clients but pilots will get
     config wrong. Defense in depth: refuse anything that would let an
     authenticated /train POST probe loopback / metadata / RFC1918 IPs."""
-    _maybe_field(PrometheusDataSource, "endpoint")
-    _maybe_field(TelemetryConfig, "allow_endpoint_override")
     from intelligence.tasks.loaders import build_loader_for_task
 
     cfg = IntelligenceConfig(
@@ -170,8 +156,6 @@ def test_loader_rejects_ssrf_targets_even_when_flag_on(bad_url, reason):
 def test_loader_falls_back_to_configured_endpoint_when_no_override():
     """No override in the request: the loader uses the configured endpoint
     even when the flag is on."""
-    _maybe_field(PrometheusDataSource, "endpoint")
-    _maybe_field(TelemetryConfig, "allow_endpoint_override")
     from intelligence.tasks.loaders import build_loader_for_task
 
     cfg = IntelligenceConfig(

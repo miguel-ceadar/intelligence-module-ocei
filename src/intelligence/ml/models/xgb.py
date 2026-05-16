@@ -19,18 +19,26 @@ from typing import Any
 import numpy as np
 import pandas as pd
 from sklearn.preprocessing import StandardScaler
+from xgboost import XGBRegressor
 
 from intelligence.api.schemas import ForecastPoint
+from intelligence.ml.artifact.sidecars import (
+    load_input_spec,
+    load_json,
+    load_sklearn_scaler,
+    save_input_spec,
+    save_json,
+    save_sklearn_scaler,
+)
 from intelligence.ml.models._common import (
     assemble_predict_window,
     coerce_metrics,
     supervised_window,
     supervised_window_columns,
 )
+from intelligence.ml.trainers import ModelTrainer
 
 logger = logging.getLogger(__name__)
-
-_TIMESTAMP_COLS = {"time", "timestamp", "date"}
 
 
 def _ensure_estimator_type(reg) -> None:
@@ -62,8 +70,6 @@ class XgbModel:
         carries the fitted regressor, both scalers, and the sliding-
         window length.
         """
-        from intelligence.ml.trainers import ModelTrainer
-
         params = {**self.default_params, **components.get("model_parameters", {})}
         components_with_params = {**components, "model_parameters": params}
 
@@ -88,12 +94,6 @@ class XgbModel:
         The model is saved as ``xgb.ubj`` via xgboost's native UBJ
         format. Both scalers persist as JSON + NPZ sidecars.
         """
-        from intelligence.ml.artifact.sidecars import (
-            save_input_spec,
-            save_json,
-            save_sklearn_scaler,
-        )
-
         regressor = artifacts["regressor"]
         _ensure_estimator_type(regressor)
         regressor.save_model(str(dest / "xgb.ubj"))
@@ -130,14 +130,6 @@ class XgbModel:
         """Restore the dict shape ``fit`` emits, plus ``input_spec``
         if it was persisted.
         """
-        from xgboost import XGBRegressor
-
-        from intelligence.ml.artifact.sidecars import (
-            load_input_spec,
-            load_json,
-            load_sklearn_scaler,
-        )
-
         regressor = XGBRegressor()
         _ensure_estimator_type(regressor)
         regressor.load_model(str(src / "xgb.ubj"))
@@ -216,27 +208,26 @@ def make_xgb_prepare(
     covariates after. Columns are looked up in the DataFrame by name,
     not by position, so a CSV with reordered columns (or an upstream
     loader that joins in a different order) still trains the model on
-    the right target. Missing names raise; extras are ignored. ``None``
-    is single-target legacy mode that picks the first non-timestamp
-    column.
+    the right target. Missing names raise; extras are ignored. Required;
+    builders always supply it.
 
     Pipeline: select named columns → ``ts_supervised_structure``
     (lagged features + target) → split 80/20 → fit separate
     ``StandardScaler``s for X and y → return components dict expected
     by ``ModelTrainer.train_xgb``.
     """
+    if not feature_names:
+        raise ValueError("make_xgb_prepare requires a non-empty feature_names list")
+    feature_names = list(feature_names)
 
     def prepare(df: pd.DataFrame) -> dict:
-        if feature_names is None:
-            cols = [next(c for c in df.columns if c.lower() not in _TIMESTAMP_COLS)]
-        else:
-            missing = [n for n in feature_names if n not in df.columns]
-            if missing:
-                raise ValueError(
-                    f"make_xgb_prepare expected columns {list(feature_names)!r}, "
-                    f"missing {missing!r}; DataFrame has {list(df.columns)!r}"
-                )
-            cols = list(feature_names)
+        missing = [n for n in feature_names if n not in df.columns]
+        if missing:
+            raise ValueError(
+                f"make_xgb_prepare expected columns {list(feature_names)!r}, "
+                f"missing {missing!r}; DataFrame has {list(df.columns)!r}"
+            )
+        cols = list(feature_names)
         num_variables = len(cols)
         data = df[cols].astype(float).reset_index(drop=True)
 

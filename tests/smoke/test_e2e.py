@@ -81,7 +81,7 @@ TASKS: list[tuple[str, str, dict[str, list[float]]]] = [
     ("cpu_forecast_xgb", "2m", {"cpu": _CPU_WINDOW}),
     ("cpu_forecast_lstm", "2m", {"cpu": _CPU_WINDOW}),
     ("cpu_forecast_arima_drift", "2m", {"cpu": [0.3] * 12}),
-    # Multivariate (Phase 3)
+    # Multivariate
     ("cpu_mem_forecast_xgb", "2m", {"cpu": _CPU_WINDOW, "mem": _MEM_WINDOW}),
     ("cpu_mem_forecast_lstm", "2m", {"cpu": _CPU_WINDOW, "mem": _MEM_WINDOW}),
     ("cpu_mem_drift", "2m", {"cpu": [0.3] * 12, "mem": [0.6] * 12}),

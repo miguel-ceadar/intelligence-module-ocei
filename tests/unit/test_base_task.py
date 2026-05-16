@@ -1,4 +1,4 @@
-"""Phase-1 §2.3 / §2.6: lazy model loading on ``BaseTask``.
+"""Lazy model loading on ``BaseTask``.
 
 Construction is side-effect free. The artefact is fetched on first
 predict and cached for subsequent calls. Training invalidates the

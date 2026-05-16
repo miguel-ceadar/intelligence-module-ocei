@@ -15,8 +15,8 @@ Expects components produced by ``make_lstm_prepare``:
     to inverse-transform network output. Mirrors XGB's two-scaler
     pattern (y-scaler == ``scaler_obj``, x-scaler == ``scaler_X``).
   - ``model_parameters``: ``input_size``, ``output_size``, ``hidden_size``,
-    ``num_epochs``. Optional: ``distill``. ``output_size`` is the trained
-    horizon; predict refuses requests above it.
+    ``num_epochs``. ``output_size`` is the trained horizon; predict
+    refuses requests above it.
 """
 
 from __future__ import annotations
@@ -27,18 +27,29 @@ from pathlib import Path
 from typing import Any
 
 import pandas as pd
+import torch
+from safetensors.torch import load_file, save_file
 from sklearn.preprocessing import MinMaxScaler
 
 from intelligence.api.schemas import ForecastPoint
+from intelligence.ml.artifact.sidecars import (
+    load_input_spec,
+    load_json,
+    load_sklearn_scaler,
+    save_input_spec,
+    save_json,
+    save_sklearn_scaler,
+)
 from intelligence.ml.models._common import (
     assemble_predict_window,
     coerce_metrics,
     supervised_window,
 )
+from intelligence.ml.trainers import ModelTrainer
+from intelligence.ml.trainers.base import TimeSeriesDataset
+from intelligence.ml.trainers.lstm import LSTMModel as _LSTMModule
 
 logger = logging.getLogger(__name__)
-
-_TIMESTAMP_COLS = {"time", "timestamp", "date"}
 
 
 class LstmModel:
@@ -63,8 +74,6 @@ class LstmModel:
         carries the trained network, the scaler, and the architecture
         sizes plus window metadata.
         """
-        from intelligence.ml.trainers import ModelTrainer
-
         params = {**self.default_params, **components.get("model_parameters", {})}
         components_with_params = {**components, "model_parameters": params}
         trainer = ModelTrainer(components_with_params)
@@ -92,14 +101,6 @@ class LstmModel:
         carries the constructor sizes so ``load_artifacts`` can rebuild
         the network before loading weights.
         """
-        from safetensors.torch import save_file
-
-        from intelligence.ml.artifact.sidecars import (
-            save_input_spec,
-            save_json,
-            save_sklearn_scaler,
-        )
-
         network = artifacts["network"]
         network.cpu()  # keep weights portable across devices
         save_file(network.state_dict(), str(dest / "lstm.safetensors"))
@@ -138,17 +139,8 @@ class LstmModel:
         """Restore the dict shape ``fit`` emits, plus ``input_spec``
         if it was persisted.
         """
-        from safetensors.torch import load_file
-
-        from intelligence.ml.artifact.sidecars import (
-            load_input_spec,
-            load_json,
-            load_sklearn_scaler,
-        )
-        from intelligence.ml.trainers.lstm import LSTMModel
-
         arch = load_json(src, "arch.json")
-        network = LSTMModel(
+        network = _LSTMModule(
             input_size=int(arch["input_size"]),
             hidden_size=int(arch["hidden_size"]),
             output_size=int(arch["output_size"]),
@@ -184,8 +176,6 @@ class LstmModel:
         truncated. No confidence intervals — ``lower``/``upper`` stay
         ``None``.
         """
-        import torch
-
         trained_horizon = int(artifacts.get("horizon", artifacts.get("output_size", 1)))
         if horizon > trained_horizon:
             raise ValueError(
@@ -227,8 +217,7 @@ def make_lstm_prepare(
 
     ``feature_names`` is the canonical feature order — target first,
     covariates after. Columns are looked up in the DataFrame by name,
-    not by position. ``None`` is single-target legacy mode that picks
-    the first non-timestamp column.
+    not by position. Required; builders always supply it.
 
     The supervised structure emits a ``(samples, horizon)`` y-tensor —
     target only across the horizon — paired with
@@ -241,22 +230,18 @@ def make_lstm_prepare(
         used to inverse-transform network output. The dual-scaler
         pattern matches XGB (``scaler_obj`` = y, ``scaler_X`` = x).
     """
+    if not feature_names:
+        raise ValueError("make_lstm_prepare requires a non-empty feature_names list")
+    feature_names = list(feature_names)
 
     def prepare(df: pd.DataFrame) -> dict:
-        import torch
-
-        from intelligence.ml.trainers.base import TimeSeriesDataset
-
-        if feature_names is None:
-            cols = [next(c for c in df.columns if c.lower() not in _TIMESTAMP_COLS)]
-        else:
-            missing = [n for n in feature_names if n not in df.columns]
-            if missing:
-                raise ValueError(
-                    f"make_lstm_prepare expected columns {list(feature_names)!r}, "
-                    f"missing {missing!r}; DataFrame has {list(df.columns)!r}"
-                )
-            cols = list(feature_names)
+        missing = [n for n in feature_names if n not in df.columns]
+        if missing:
+            raise ValueError(
+                f"make_lstm_prepare expected columns {list(feature_names)!r}, "
+                f"missing {missing!r}; DataFrame has {list(df.columns)!r}"
+            )
+        cols = list(feature_names)
         num_variables = len(cols)
         data = df[cols].astype(float).reset_index(drop=True)
 

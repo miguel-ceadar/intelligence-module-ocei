@@ -10,9 +10,9 @@ from unittest import mock
 
 import pytest
 
-pytestmark = pytest.mark.integration
+from intelligence.api import service as api
 
-api = pytest.importorskip("intelligence.api.service")
+pytestmark = pytest.mark.integration
 
 
 class _FakeTask:

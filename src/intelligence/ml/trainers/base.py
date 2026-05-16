@@ -17,7 +17,7 @@ from torch.utils.data import DataLoader, Dataset
 from tqdm import tqdm
 from xgboost import XGBRegressor
 
-from intelligence.ml.trainers.lstm import LighterStudentLSTMModel, LSTMModel
+from intelligence.ml.trainers.lstm import LSTMModel
 from intelligence.ml.trainers.metrics import (
     metrics as compute_metrics,
 )
@@ -41,10 +41,8 @@ class TimeSeriesDataset(Dataset):
         return self.X[idx], self.y[idx]
 
 
-def _make_loaders(train_dataset, test_dataset, batch_size: int) -> tuple[DataLoader, DataLoader]:
-    train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
-    val_loader = DataLoader(test_dataset, batch_size=batch_size, shuffle=False)
-    return train_loader, val_loader
+def _make_train_loader(train_dataset, batch_size: int) -> DataLoader:
+    return DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
 
 
 class ModelTrainer:
@@ -66,7 +64,13 @@ class ModelTrainer:
         y_test = np.array(self.data_components["y_test"]).reshape(-1, 1)
         return compute_metrics(y_test, y_pred), model
 
-    def train_arima(self):
+    def train_arima(self) -> tuple[dict, list]:
+        """Walk-forward train + eval; returns ``(metrics, history)``.
+
+        ``history`` is the scaled train+test series at the end of the
+        walk, which the persisted artifact replays at predict time so
+        new requests refit against the full observed window.
+        """
         train = self.data_components["X_train"].squeeze(1)
         test = self.data_components["X_test"].squeeze(1)
         p = self.data_components["model_parameters"]["p"]
@@ -89,7 +93,7 @@ class ModelTrainer:
         y_test = self.data_components["scaler_obj"].inverse_transform(
             self.data_components["X_test"].reshape(-1, 1)
         )
-        return compute_metrics(y_test, y_pred), model, history, y_test, y_pred
+        return compute_metrics(y_test, y_pred), history
 
     def _train_lstm(self, model, train_loader, criterion, optimizer, num_epochs, device):
         step_epoch: list[int] = []
@@ -111,87 +115,6 @@ class ModelTrainer:
             logger.info("Epoch [%d/%d], Train Loss: %.4f", epoch + 1, num_epochs, avg)
         return model, step_epoch, step_loss
 
-    def _kd_regression(
-        self,
-        teacher,
-        student,
-        train_loader,
-        epochs,
-        T,
-        soft_target_loss_weight,
-        ce_loss_weight,
-        optimizer,
-        method,
-        device,
-    ):
-        torch.manual_seed(42)
-        np.random.seed(42)
-        teacher.eval()
-        student.train()
-
-        mse_criterion = nn.MSELoss()
-        ce_criterion = nn.CrossEntropyLoss()
-
-        step_epoch: list[int] = []
-        step_loss: list[float] = []
-
-        for epoch in range(epochs):
-            running_loss = 0.0
-            for inputs, labels in train_loader:
-                inputs, labels = inputs.to(device), labels.to(device)
-                optimizer.zero_grad()
-                with torch.no_grad():
-                    teacher_outputs = teacher(inputs)
-                student_outputs = student(inputs)
-                if method == 1:
-                    loss = mse_criterion(student_outputs, teacher_outputs)
-                else:
-                    mse = mse_criterion(student_outputs, teacher_outputs)
-                    soft = ce_criterion(student_outputs / T, teacher_outputs / T) * (T * T)
-                    loss = soft_target_loss_weight * soft + ce_loss_weight * mse
-                loss.backward()
-                optimizer.step()
-                running_loss += loss.item()
-            avg = running_loss / len(train_loader)
-            step_epoch.append(epoch + 1)
-            step_loss.append(avg)
-            if (epoch + 1) % 10 == 0:
-                logger.info("Epoch [%d/%d], Loss: %.4f", epoch + 1, epochs, avg)
-
-        return student, step_epoch, step_loss
-
-    def _distilled_process(
-        self,
-        teacher_trained,
-        train_loader,
-        val_loader,
-        input_size,
-        output_size,
-        num_epochs,
-        criterion,
-        device,
-    ):
-        hidden_size = 4
-        student = LighterStudentLSTMModel(input_size, hidden_size, output_size).to(device)
-        optimizer = optim.Adam(student.parameters(), lr=0.001)
-        student_trained, se_s, sl_s = self._train_lstm(
-            student, train_loader, criterion, optimizer, num_epochs, device
-        )
-        optimizer = optim.Adam(student.parameters(), lr=0.1)
-        distilled, se_d, sl_d = self._kd_regression(
-            teacher=teacher_trained,
-            student=student_trained,
-            train_loader=train_loader,
-            epochs=50,
-            T=2,
-            soft_target_loss_weight=0.25,
-            ce_loss_weight=0.75,
-            optimizer=optimizer,
-            method=2,
-            device=device,
-        )
-        return distilled, se_s, sl_s, se_d, sl_d
-
     def train_pytorch(self, device: str = "cpu"):
         device_t = torch.device(device)
         params = self.data_components["model_parameters"]
@@ -202,14 +125,9 @@ class ModelTrainer:
         output_size = params["output_size"]
         hidden_size = params["hidden_size"]
         num_epochs = params["num_epochs"]
-        distill = params.get("distill", False)
 
         batch_size = self.data_components["batch_size"]
-        train_loader, val_loader = _make_loaders(
-            self.data_components["train_dataset"],
-            self.data_components["test_dataset"],
-            batch_size=batch_size,
-        )
+        train_loader = _make_train_loader(self.data_components["train_dataset"], batch_size)
         model = LSTMModel(input_size, hidden_size, output_size).to(device_t)
         logger.info("Floating point model: %s", model)
         print_size_of_model(model, "fp32")
@@ -219,18 +137,6 @@ class ModelTrainer:
         model, step_epoch_train, step_loss_train = self._train_lstm(
             model, train_loader, criterion, optimizer, num_epochs, device_t
         )
-
-        if distill:
-            model, *_ = self._distilled_process(
-                model,
-                train_loader,
-                val_loader,
-                input_size,
-                output_size,
-                num_epochs,
-                criterion,
-                device_t,
-            )
 
         outputs = model(self.data_components["X_test"].to(device_t))
         y_pred = outputs.cpu().detach().numpy().reshape(outputs.shape[0], outputs.shape[1])

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+from intelligence.ml.models.lstm import LstmModel, make_lstm_prepare
 from intelligence.tasks.base import BaseTask
 from intelligence.tasks.builders._common import build_input_spec
 from intelligence.tasks.loaders import build_loader_for_task
@@ -17,10 +18,6 @@ def build_lstm_task(
     task_cfg: LstmTaskConfig,
     intelligence_cfg: IntelligenceConfig,
 ) -> BaseTask:
-    # torch is the heaviest dep we ship — lazy-imported here so non-LSTM
-    # deployments don't pay the cost on registry build.
-    from intelligence.ml.models.lstm import LstmModel, make_lstm_prepare
-
     # The network's I/O shape is dictated by the task config, not by
     # whatever default ``model_params`` carries: ``input_size`` is the
     # feature count (one channel per feature in the input tensor) and

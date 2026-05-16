@@ -1,9 +1,9 @@
 """Shared fixtures.
 
-Tests import from ``intelligence.*`` (the new home). Where the implementation
-hasn't landed yet, tests use ``pytest.importorskip`` so the suite reports
-SKIPPED rather than blowing up at collection. As phase-1 chunks land, those
-skips flip to passes. ``--strict-markers`` keeps marker typos honest.
+``--strict-markers`` keeps marker typos honest (see pyproject.toml).
+Per-session ``BENTOML_HOME`` isolation keeps test saves out of
+``~/bentoml``; tests that need *inter-test* isolation reset it again
+via ``monkeypatch.setenv("BENTOML_HOME", str(tmp_path / "bentoml"))``.
 """
 
 from __future__ import annotations

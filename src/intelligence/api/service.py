@@ -22,8 +22,12 @@ import time
 from contextlib import asynccontextmanager
 from pathlib import Path
 
+import bentoml
+import requests
+from bentoml.exceptions import NotFound
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import JSONResponse
+from huggingface_hub.errors import HfHubHTTPError
 
 from intelligence import __version__
 from intelligence.api.auth import BearerTokenMiddleware, resolve_expected_token
@@ -139,8 +143,6 @@ def compute_readiness(reg: TaskRegistry) -> tuple[bool, list[dict]]:
         failures.append({"check": "registry", "detail": "no tasks enabled"})
 
     try:
-        import bentoml
-
         bentoml.models.list()
     except Exception as e:
         failures.append({"check": "bento_store", "detail": str(e)})
@@ -247,9 +249,6 @@ def delete_task_version(task_name: str, version: str) -> dict:
     - The currently ``pinned_version`` is refused: deleting it would
       immediately break ``/predict`` for that task.
     """
-    import bentoml
-    from bentoml.exceptions import NotFound
-
     if task_name not in registry:
         raise HTTPException(status_code=404, detail=f"unknown task: {task_name}")
     if version == "latest":
@@ -317,8 +316,6 @@ def list_models() -> dict:
 
 @app.post("/tasks/{task_name}/train", response_model=TrainResponse)
 def train(task_name: str, req: TrainRequest):
-    import requests
-
     if task_name not in registry:
         raise HTTPException(status_code=404, detail=f"unknown task: {task_name}")
     task = registry.get(task_name)
@@ -358,9 +355,6 @@ def sync_model(req: ModelSyncRequest):
     the environment. Pulled models still need to match the task's
     ``input_spec`` to be served (see ``BaseTask._verify_artifact``).
     """
-    import requests
-    from huggingface_hub.errors import HfHubHTTPError
-
     cfg = config.intelligence.model_repo
     if not cfg.hf_enabled:
         raise HTTPException(

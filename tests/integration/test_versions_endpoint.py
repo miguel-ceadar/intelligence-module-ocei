@@ -7,12 +7,11 @@ from unittest import mock
 
 import pytest
 
+from intelligence.api import service as api
 from intelligence.ml.artifact import SavedArtifact
 from intelligence.ml.artifact.manifest import Manifest
 
 pytestmark = pytest.mark.integration
-
-api = pytest.importorskip("intelligence.api.service")
 
 
 @pytest.fixture

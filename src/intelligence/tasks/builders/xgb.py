@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+from intelligence.ml.models.xgb import XgbModel, make_xgb_prepare
 from intelligence.tasks.base import BaseTask
 from intelligence.tasks.builders._common import build_input_spec
 from intelligence.tasks.loaders import build_loader_for_task
@@ -17,9 +18,6 @@ def build_xgb_task(
     task_cfg: XgbTaskConfig,
     intelligence_cfg: IntelligenceConfig,
 ) -> BaseTask:
-    # xgboost (+ libgomp at the OS level) lives inside XgbModel — lazy.
-    from intelligence.ml.models.xgb import XgbModel, make_xgb_prepare
-
     # ``model_dump()`` preserves both the named defaults and any
     # extra=allow fields (forward-compat with newer xgboost knobs).
     feature_names = [f.name for f in task_cfg.features]

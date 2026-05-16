@@ -1,4 +1,4 @@
-"""Phase-1 §2.4: explicit input contract per task.
+"""Explicit input contract per task.
 
 InputSpec captures shape (n_features, steps_back, feature_names) and
 optional value_range / units. Validation happens at the API boundary so
@@ -9,18 +9,10 @@ from __future__ import annotations
 
 import pytest
 
-contracts = pytest.importorskip("intelligence.tasks.contracts", reason="phase-1 §2.4 pending")
-
-
-def _import_or_skip(name: str):
-    obj = getattr(contracts, name, None)
-    if obj is None:
-        pytest.skip(f"intelligence.tasks.contracts.{name} not implemented yet")
-    return obj
+from intelligence.tasks.contracts import ContractViolation, InputSpec
 
 
 def test_input_spec_is_constructable():
-    InputSpec = _import_or_skip("InputSpec")
     spec = InputSpec(
         n_features=2,
         feature_names=["cpu", "mem"],
@@ -33,24 +25,18 @@ def test_input_spec_is_constructable():
 
 
 def test_input_spec_rejects_wrong_feature_count():
-    InputSpec = _import_or_skip("InputSpec")
-    ContractViolation = _import_or_skip("ContractViolation")
     spec = InputSpec(n_features=2, feature_names=["cpu", "mem"], steps_back=6)
     with pytest.raises(ContractViolation, match="features"):
         spec.validate({"cpu": [0.5] * 6})  # missing 'mem'
 
 
 def test_input_spec_rejects_wrong_steps_back():
-    InputSpec = _import_or_skip("InputSpec")
-    ContractViolation = _import_or_skip("ContractViolation")
     spec = InputSpec(n_features=1, feature_names=["cpu"], steps_back=6)
     with pytest.raises(ContractViolation, match=r"steps|window|length"):
         spec.validate({"cpu": [0.5] * 4})
 
 
 def test_input_spec_rejects_out_of_range():
-    InputSpec = _import_or_skip("InputSpec")
-    ContractViolation = _import_or_skip("ContractViolation")
     spec = InputSpec(
         n_features=1,
         feature_names=["cpu"],
@@ -65,8 +51,6 @@ def test_input_spec_rejects_nan_values():
     """NaN bypasses ``<``/``>`` comparisons silently, so a NaN would
     pass the value_range check and crash the scaler downstream with an
     opaque error. Reject explicitly at the contract boundary."""
-    InputSpec = _import_or_skip("InputSpec")
-    ContractViolation = _import_or_skip("ContractViolation")
     spec = InputSpec(
         n_features=1,
         feature_names=["cpu"],
@@ -81,8 +65,6 @@ def test_input_spec_rejects_inf_values():
     """+/-Inf would technically be caught by the value_range check but
     with a confusing 'outside range' message. Reject explicitly so the
     operator sees 'not finite' instead."""
-    InputSpec = _import_or_skip("InputSpec")
-    ContractViolation = _import_or_skip("ContractViolation")
     spec = InputSpec(n_features=1, feature_names=["cpu"], steps_back=3)
     with pytest.raises(ContractViolation, match=r"not finite"):
         spec.validate({"cpu": [0.5, float("inf"), 0.5]})
@@ -94,15 +76,12 @@ def test_input_spec_rejects_non_numeric_values():
     """A string or None slipping through pydantic's parsing should fail
     at the contract boundary with a clear message rather than at
     float(v) deep in the scaler."""
-    InputSpec = _import_or_skip("InputSpec")
-    ContractViolation = _import_or_skip("ContractViolation")
     spec = InputSpec(n_features=1, feature_names=["cpu"], steps_back=3)
     with pytest.raises(ContractViolation, match=r"not numeric"):
         spec.validate({"cpu": [0.5, "oops", 0.5]})  # type: ignore[list-item]
 
 
 def test_input_spec_passes_valid_input():
-    InputSpec = _import_or_skip("InputSpec")
     spec = InputSpec(
         n_features=1,
         feature_names=["cpu"],
@@ -119,7 +98,6 @@ def test_input_spec_rejects_zero_n_features():
     can't slip past."""
     from pydantic import ValidationError
 
-    InputSpec = _import_or_skip("InputSpec")
     with pytest.raises(ValidationError, match="n_features"):
         InputSpec(n_features=0, feature_names=["cpu"], steps_back=6)
 
@@ -129,7 +107,6 @@ def test_input_spec_rejects_empty_feature_names():
     same loophole expressed through the other field."""
     from pydantic import ValidationError
 
-    InputSpec = _import_or_skip("InputSpec")
     with pytest.raises(ValidationError, match="feature_names"):
         InputSpec(n_features=1, feature_names=[], steps_back=6)
 
@@ -140,7 +117,6 @@ def test_input_spec_rejects_count_name_mismatch():
     that pydantic's field-level constraints can't express."""
     from pydantic import ValidationError
 
-    InputSpec = _import_or_skip("InputSpec")
     with pytest.raises(ValidationError, match=r"n_features|feature_names"):
         InputSpec(n_features=2, feature_names=["cpu"], steps_back=6)
 
@@ -149,7 +125,6 @@ def test_input_spec_json_roundtrip():
     """``InputSpec`` is persisted as ``input_spec.json`` via pydantic's
     JSON round-trip (not pickle). Tuples in ``value_range`` must survive
     the trip so the predict path can still destructure ``(lo, hi)``."""
-    InputSpec = _import_or_skip("InputSpec")
     spec = InputSpec(
         n_features=2,
         feature_names=["a", "b"],

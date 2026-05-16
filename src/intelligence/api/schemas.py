@@ -105,12 +105,6 @@ class PredictResponse(BaseModel):
     model_version: str | None = None
 
 
-class TaskInfo(BaseModel):
-    name: str
-    model_type: str
-    has_drift: bool
-
-
 class ModelSyncRequest(BaseModel):
     action: Literal["push", "pull"]
     model_tag: str

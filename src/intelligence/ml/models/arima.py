@@ -13,9 +13,19 @@ from pathlib import Path
 from typing import Any
 
 import numpy as np
+from statsmodels.tsa.arima.model import ARIMA
 
 from intelligence.api.schemas import ForecastPoint
+from intelligence.ml.artifact.sidecars import (
+    load_input_spec,
+    load_json,
+    load_sklearn_scaler,
+    save_input_spec,
+    save_json,
+    save_sklearn_scaler,
+)
 from intelligence.ml.models._common import coerce_metrics
+from intelligence.ml.trainers import ModelTrainer
 
 logger = logging.getLogger(__name__)
 
@@ -38,13 +48,11 @@ class ArimaModel:
         carries the scaler, the walk-forward history series, the
         ARIMA order, and the test sample size.
         """
-        from intelligence.ml.trainers import ModelTrainer
-
         order_params = {**self.default_params, **components.get("model_parameters", {})}
         components_with_params = {**components, "model_parameters": order_params}
 
         trainer = ModelTrainer(components_with_params)
-        metrics, _model, history, _y_test, _y_pred = trainer.train_arima()
+        metrics, history = trainer.train_arima()
         metrics_jsonable = coerce_metrics(metrics)
 
         artifacts = {
@@ -66,12 +74,6 @@ class ArimaModel:
         ARIMA refits on every predict call, so the on-disk model file
         is just ``arima.json`` (order + history).
         """
-        from intelligence.ml.artifact.sidecars import (
-            save_input_spec,
-            save_json,
-            save_sklearn_scaler,
-        )
-
         save_json(
             dest,
             "arima.json",
@@ -102,12 +104,6 @@ class ArimaModel:
         """Restore the dict shape ``fit`` emits, plus ``input_spec``
         if it was persisted.
         """
-        from intelligence.ml.artifact.sidecars import (
-            load_input_spec,
-            load_json,
-            load_sklearn_scaler,
-        )
-
         arima_data = load_json(src, "arima.json")
         loaded: dict[str, Any] = {
             "scaler_obj": load_sklearn_scaler(src, "scaler"),
@@ -150,8 +146,6 @@ class ArimaModel:
                 ),
             )
         )
-
-        from statsmodels.tsa.arima.model import ARIMA
 
         last_scaled = float(scaler.transform(np.array([[values[-1]]]))[0][0])
         history.append(last_scaled)
