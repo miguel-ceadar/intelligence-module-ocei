@@ -34,10 +34,14 @@ RUN --mount=type=cache,target=/root/.cache/uv \
     uv sync --locked --no-dev --no-editable --extra drift
 
 
-FROM python:3.11-slim
+FROM python:3.11-slim-bookworm
 
 # libgomp1: xgboost native runtime. curl: compose healthcheck. ca-certs: HTTPS.
-RUN apt-get update && apt-get install -y --no-install-recommends \
+# apt-get upgrade pulls patched system libs that the base image hasn't been
+# rebuilt against yet — trivy flags them otherwise.
+RUN apt-get update \
+    && apt-get upgrade -y \
+    && apt-get install -y --no-install-recommends \
         libgomp1 \
         ca-certificates \
         curl \
