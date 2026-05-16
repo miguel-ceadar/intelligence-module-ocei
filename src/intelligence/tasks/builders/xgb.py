@@ -23,6 +23,12 @@ def build_xgb_task(
     # ``model_dump()`` preserves both the named defaults and any
     # extra=allow fields (forward-compat with newer xgboost knobs).
     feature_names = [f.name for f in task_cfg.features]
+    # XGB is recursive (one-step ahead during training), so
+    # ``supervised_window`` uses ``n_out=1``. The binding constraint is
+    # ``len(test) >= look_back + 1`` after the 80/20 split — i.e.
+    # ``5 * (look_back + 1)`` rows total. Below this, training crashed
+    # deep in ``supervised_window`` with a less actionable message.
+    min_points = max(30, 5 * (task_cfg.steps_back + 1))
     return BaseTask(
         name=name,
         model=XgbModel(**task_cfg.model_params.model_dump()),
@@ -35,6 +41,7 @@ def build_xgb_task(
                 feature_names=feature_names,
             ),
             queries=[f.query for f in task_cfg.features],
+            min_points=min_points,
         ),
         input_spec=build_input_spec(
             features=task_cfg.features,

@@ -33,6 +33,12 @@ def build_lstm_task(
     }
 
     feature_names = [f.name for f in task_cfg.features]
+    # The 80/20 split + ``supervised_window(n_in=look_back, n_out=horizon)``
+    # needs ``len(test) >= look_back + horizon``, and test is 20% of total
+    # — so the loader must hand the prepare at least
+    # ``5 * (look_back + horizon)`` rows. Below this, training crashed
+    # deep in ``supervised_window`` with a less actionable message.
+    min_points = max(30, 5 * (task_cfg.steps_back + task_cfg.horizon))
     return BaseTask(
         name=name,
         model=LstmModel(**model_params),
@@ -47,6 +53,7 @@ def build_lstm_task(
                 horizon=task_cfg.horizon,
             ),
             queries=[f.query for f in task_cfg.features],
+            min_points=min_points,
         ),
         input_spec=build_input_spec(
             features=task_cfg.features,

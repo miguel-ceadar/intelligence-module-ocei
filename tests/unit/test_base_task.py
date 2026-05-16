@@ -208,6 +208,51 @@ def test_predict_allows_horizon_within_max(task):
     t.model.predict.assert_called_once()
 
 
+def test_predict_cache_evicts_least_recently_used(task):
+    """The per-task artifact cache is bounded — a client probing many
+    distinct ``model_version`` values can't grow RSS without limit. The
+    least-recently-used entry is dropped once the cache passes its cap;
+    re-requesting the evicted version triggers a fresh store lookup."""
+    from intelligence.tasks.base import _CACHE_MAXSIZE
+
+    with mock.patch("intelligence.tasks.base.get_artifact_by_tag") as get:
+        # Each requested version maps to a distinct fake artifact.
+        get.side_effect = lambda tag: _fake_saved(tag)
+
+        # Fill the cache to its cap, then add one more — the first
+        # version requested should be the one evicted.
+        for i in range(_CACHE_MAXSIZE + 1):
+            task.predict(PredictRequest(input_series={"x": [1.0]}, model_version=f"v{i}"))
+        assert len(task._cached_artifacts) == _CACHE_MAXSIZE
+        assert "v0" not in task._cached_artifacts
+        assert f"v{_CACHE_MAXSIZE}" in task._cached_artifacts
+
+        # Re-requesting the evicted version re-hits the store; the
+        # second lookup of v0 proves the cache was actually evicting.
+        baseline = get.call_count
+        task.predict(PredictRequest(input_series={"x": [1.0]}, model_version="v0"))
+        assert get.call_count == baseline + 1
+
+
+def test_predict_cache_lru_promotion_keeps_recent_entries(task):
+    """Accessing a cached entry moves it to the MRU end so a subsequent
+    overflow evicts something *older*, not the just-touched entry."""
+    from intelligence.tasks.base import _CACHE_MAXSIZE
+
+    with mock.patch("intelligence.tasks.base.get_artifact_by_tag") as get:
+        get.side_effect = lambda tag: _fake_saved(tag)
+
+        for i in range(_CACHE_MAXSIZE):
+            task.predict(PredictRequest(input_series={"x": [1.0]}, model_version=f"v{i}"))
+
+        # Touch v0 so v1 (now the LRU) becomes the eviction candidate.
+        task.predict(PredictRequest(input_series={"x": [1.0]}, model_version="v0"))
+        task.predict(PredictRequest(input_series={"x": [1.0]}, model_version="new"))
+
+        assert "v0" in task._cached_artifacts
+        assert "v1" not in task._cached_artifacts
+
+
 def test_predict_raises_filenotfound_when_no_artefact_in_store(task):
     """Without a saved artefact, predict must raise FileNotFoundError —
     the API layer translates that to 503 (see service.predict)."""

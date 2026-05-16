@@ -80,6 +80,54 @@ def test_config_drift_with_unknown_forecaster_raises(tmp_path: Path):
         config.load_config(p)
 
 
+def test_config_drift_with_mismatched_features_raises(tmp_path: Path):
+    """A drift detector that watches features different from its paired
+    forecaster's produces meaningless dashboards — drift alarms on a
+    signal the forecaster never sees. Force the feature names to match
+    at load time."""
+    p = tmp_path / "mismatched-drift.yaml"
+    p.write_text(
+        """
+        intelligence:
+          tasks:
+            cpu_forecast:
+              kind: arima
+              features:
+                - name: cpu
+            cpu_drift:
+              kind: drift
+              forecaster: cpu_forecast
+              features:
+                - name: mem
+        """.strip()
+    )
+    with pytest.raises(ValueError, match="features"):
+        config.load_config(p)
+
+
+def test_config_drift_with_matching_features_loads(tmp_path: Path):
+    """Happy path for the cross-feature validator — drift and forecaster
+    both list ``cpu`` and the config loads cleanly."""
+    p = tmp_path / "matched-drift.yaml"
+    p.write_text(
+        """
+        intelligence:
+          tasks:
+            cpu_forecast:
+              kind: arima
+              features:
+                - name: cpu
+            cpu_drift:
+              kind: drift
+              forecaster: cpu_forecast
+              features:
+                - name: cpu
+        """.strip()
+    )
+    cfg = config.load_config(p)
+    assert set(cfg.intelligence.tasks) == {"cpu_forecast", "cpu_drift"}
+
+
 def test_appconfig_defaults_evaluate_env_at_call_not_import(monkeypatch):
     """``AppConfig()`` with no YAML should read env vars at *call*, not at
     module import. The old ``intelligence: IntelligenceConfig =

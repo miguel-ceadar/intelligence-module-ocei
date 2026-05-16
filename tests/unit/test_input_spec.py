@@ -112,6 +112,39 @@ def test_input_spec_passes_valid_input():
     spec.validate({"cpu": [0.1, 0.2, 0.3, 0.4, 0.5, 0.6]})  # no exception
 
 
+def test_input_spec_rejects_zero_n_features():
+    """A spec with ``n_features=0`` would accept any input as valid (the
+    empty-dict request would match), bypassing the whole contract. Reject
+    at construction so a tampered or mis-written ``input_spec.json``
+    can't slip past."""
+    from pydantic import ValidationError
+
+    InputSpec = _import_or_skip("InputSpec")
+    with pytest.raises(ValidationError, match="n_features"):
+        InputSpec(n_features=0, feature_names=["cpu"], steps_back=6)
+
+
+def test_input_spec_rejects_empty_feature_names():
+    """Symmetric guard to ``n_features > 0``: ``feature_names=[]`` is the
+    same loophole expressed through the other field."""
+    from pydantic import ValidationError
+
+    InputSpec = _import_or_skip("InputSpec")
+    with pytest.raises(ValidationError, match="feature_names"):
+        InputSpec(n_features=1, feature_names=[], steps_back=6)
+
+
+def test_input_spec_rejects_count_name_mismatch():
+    """``n_features`` and ``len(feature_names)`` encode the same fact; a
+    spec where they disagree is corrupt. Caught by a model_validator
+    that pydantic's field-level constraints can't express."""
+    from pydantic import ValidationError
+
+    InputSpec = _import_or_skip("InputSpec")
+    with pytest.raises(ValidationError, match=r"n_features|feature_names"):
+        InputSpec(n_features=2, feature_names=["cpu"], steps_back=6)
+
+
 def test_input_spec_json_roundtrip():
     """``InputSpec`` is persisted as ``input_spec.json`` via pydantic's
     JSON round-trip (not pickle). Tuples in ``value_range`` must survive

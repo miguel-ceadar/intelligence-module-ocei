@@ -100,7 +100,6 @@ class PredictResponse(BaseModel):
     # caller doesn't need to know which kind of task served the
     # request — pydantic coerces from the runtime dict either way.
     prediction: list[ForecastPoint] | DriftPrediction
-    metric_type: int | None = None
     # The concrete version that actually served this request — useful for
     # logging, A/B analysis, and verifying a rollback took effect.
     model_version: str | None = None

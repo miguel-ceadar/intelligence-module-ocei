@@ -133,11 +133,19 @@ class BootstrapConfig(BaseModel):
 
 class ArimaModelParams(BaseModel):
     """ARIMA order. Defaults match ``ArimaModel.__init__``. Each field
-    must be non-negative; statsmodels rejects all-zeros at fit time."""
+    is non-negative; ``(0, 0, 0)`` is rejected here rather than letting
+    it propagate into the walk-forward loop where statsmodels would
+    eventually raise after minutes of compute."""
 
     p: int = Field(default=5, ge=0)
     d: int = Field(default=1, ge=0)
     q: int = Field(default=0, ge=0)
+
+    @model_validator(mode="after")
+    def _not_all_zero(self) -> ArimaModelParams:
+        if self.p == 0 and self.d == 0 and self.q == 0:
+            raise ValueError("ARIMA order (p, d, q) cannot be all zero")
+        return self
 
 
 class XgbModelParams(BaseModel):
@@ -339,17 +347,36 @@ class AppConfig(BaseModel):
         Pydantic's discriminated union already rejects unknown ``kind``
         values at parse time, so what's left here is the *reference*
         from a drift task's ``forecaster:`` field to another task that
-        must exist in the same config.
+        must exist in the same config, plus a feature-name consistency
+        check between the pair.
         """
         from intelligence.config.settings import DriftTaskConfig
 
-        task_names = set(self.intelligence.tasks)
-        for name, task_cfg in self.intelligence.tasks.items():
-            if isinstance(task_cfg, DriftTaskConfig) and task_cfg.forecaster not in task_names:
+        tasks = self.intelligence.tasks
+        for name, task_cfg in tasks.items():
+            if not isinstance(task_cfg, DriftTaskConfig):
+                continue
+            forecaster_cfg = tasks.get(task_cfg.forecaster)
+            if forecaster_cfg is None:
                 raise ValueError(
                     f"drift task {name!r} references forecaster "
                     f"{task_cfg.forecaster!r} which isn't defined under "
                     f"`tasks:`. Define the forecaster task or fix the reference."
+                )
+            # A drift detector watching one feature set while the paired
+            # forecaster predicts a different one produces misleading
+            # dashboards (drift alarm on metric X has no bearing on
+            # forecast quality of metric Y). Force the feature lists to
+            # match by name so the pairing is meaningful.
+            drift_names = [f.name for f in task_cfg.features]
+            forecaster_names = [f.name for f in forecaster_cfg.features]
+            if drift_names != forecaster_names:
+                raise ValueError(
+                    f"drift task {name!r} features {drift_names} do not "
+                    f"match its paired forecaster {task_cfg.forecaster!r} "
+                    f"features {forecaster_names}; align the `features:` "
+                    f"lists so the drift verdict reflects the same signal "
+                    f"the forecaster consumes."
                 )
 
 

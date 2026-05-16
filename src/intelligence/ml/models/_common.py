@@ -56,14 +56,17 @@ def assemble_predict_window(
     if len(series_keys) < num_variables:
         raise ValueError(f"need {num_variables} input series, got {len(series_keys)}")
 
+    # Length-check each series *before* stacking. ``column_stack`` on
+    # mismatched 1-D arrays would raise a shape-mismatch error that
+    # doesn't say which feature was short — surface the offender by name.
+    short = [(k, len(input_series[k])) for k in series_keys if len(input_series[k]) < look_back]
+    if short:
+        details = ", ".join(f"{name!r} has {n}" for name, n in short)
+        raise ValueError(f"need at least {look_back} observations per series, got: {details}")
+
     window = np.column_stack(
         [np.asarray(input_series[k], dtype=float)[-look_back:] for k in series_keys]
     )
-    if window.shape[0] < look_back:
-        raise ValueError(
-            f"need at least {look_back} observations per series, got {window.shape[0]}"
-        )
-
     return window, num_variables
 
 

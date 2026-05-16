@@ -474,6 +474,10 @@ def _parse_duration(spec: str) -> timedelta:
             f"invalid duration: {spec!r} (expected like '30s', '5m', '1h', '1d', '1w')"
         )
     n, unit = int(match.group(1)), match.group(2)
+    if n <= 0:
+        # Zero or negative durations make ``query_range`` return HTTP 400
+        # with an opaque error; reject at the contract boundary instead.
+        raise ValueError(f"duration must be positive: {spec!r}")
     return timedelta(**{_DURATION_UNITS[unit]: n})
 
 

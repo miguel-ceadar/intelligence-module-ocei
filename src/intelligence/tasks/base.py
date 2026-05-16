@@ -10,6 +10,7 @@ block to a per-kind builder.
 from __future__ import annotations
 
 import logging
+from collections import OrderedDict
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
@@ -29,6 +30,12 @@ if TYPE_CHECKING:
     from intelligence.config.settings import IntelligenceConfig
 
 logger = logging.getLogger(__name__)
+
+# Cap on per-task cached artifact entries. Realistic upper bound for
+# pinned/rollback candidates plus ``:latest`` — well above any normal
+# workload and small enough that an adversarial probe of distinct
+# versions can't grow memory unboundedly.
+_CACHE_MAXSIZE = 8
 
 
 @runtime_checkable
@@ -113,10 +120,14 @@ class BaseTask:
     # input_spec is missing or doesn't match the task's spec.
     allow_unverified_models: bool = False
     pinned_version: str | None = None
-    # Cache of resolved artifacts, keyed by version string. ``"latest"``
-    # is invalidated on each train; pinned versions are immutable.
-    _cached_artifacts: dict[str, tuple[dict, str]] = field(
-        default_factory=dict, init=False, repr=False
+    # LRU cache of resolved artifacts, keyed by version string.
+    # ``"latest"`` is invalidated on each train; pinned versions are
+    # immutable. Bounded so a client probing many distinct
+    # ``model_version`` values can't grow RSS without limit — once we
+    # exceed ``_CACHE_MAXSIZE``, the least-recently-used entry is
+    # evicted (it'll reload from the BentoML store on next access).
+    _cached_artifacts: OrderedDict[str, tuple[dict, str]] = field(
+        default_factory=OrderedDict, init=False, repr=False
     )
     bootstrap_state: str = field(default="pending", init=False, repr=False)
     bootstrap_error: str | None = field(default=None, init=False, repr=False)
@@ -157,16 +168,20 @@ class BaseTask:
 
         Returns ``(loaded_dict, served_tag)`` on success, or
         ``(None, None)`` when the artifact isn't in the local store.
-        Results are cached by resolved version.
+        Results are cached by resolved version up to ``_CACHE_MAXSIZE``;
+        the least-recently-used entry is evicted past the cap.
         """
         resolved = self._resolve_version(version)
         if resolved in self._cached_artifacts:
+            self._cached_artifacts.move_to_end(resolved)
             return self._cached_artifacts[resolved]
         saved = get_artifact_by_tag(f"{self.bento_name}:{resolved}")
         if saved is None:
             return None, None
         loaded = self.model.load_artifacts(saved.path)
         self._cached_artifacts[resolved] = (loaded, saved.tag)
+        if len(self._cached_artifacts) > _CACHE_MAXSIZE:
+            self._cached_artifacts.popitem(last=False)
         return loaded, saved.tag
 
     def _invalidate(self) -> None:
@@ -193,10 +208,11 @@ class BaseTask:
         return TrainResponse(model_tag=saved.tag, metrics=metrics)
 
     def predict(self, req: PredictRequest) -> PredictResponse:
-        # Validate the request before touching the store.
+        # Validate the request before touching the store. Horizon is O(1)
+        # and rejects the cheap mistake before we scan the full series.
         if self.input_spec is not None:
-            self.input_spec.validate(req.input_series)
             self.input_spec.validate_horizon(req.horizon)
+            self.input_spec.validate(req.input_series)
 
         loaded, served_tag = self._load_artifact(version=req.model_version)
         if loaded is None:

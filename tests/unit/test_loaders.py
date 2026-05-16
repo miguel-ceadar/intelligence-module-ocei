@@ -493,3 +493,15 @@ def test_parse_duration_rejects_unknown_units():
         _parse_duration("1y")  # PromQL allows it but ARIMA windows shouldn't need it
     with pytest.raises(ValueError):
         _parse_duration("nonsense")
+
+
+@pytest.mark.parametrize("spec", ["0s", "0m", "0h", "0d", "0w"])
+def test_parse_duration_rejects_zero(spec):
+    """``step=0s`` would reach Prometheus and come back as HTTP 400 with
+    an opaque message; ``window=0s`` would query an empty range. Reject
+    at the contract boundary so the error lands on the operator's
+    request, not the upstream."""
+    from intelligence.tasks.loaders import _parse_duration
+
+    with pytest.raises(ValueError, match="positive"):
+        _parse_duration(spec)

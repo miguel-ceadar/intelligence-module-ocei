@@ -18,7 +18,7 @@ from __future__ import annotations
 
 import math
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field, model_validator
 
 
 class ContractViolation(ValueError):
@@ -44,12 +44,25 @@ class InputSpec(BaseModel):
     are refused at the API boundary.
     """
 
-    n_features: int
-    feature_names: list[str]
-    steps_back: int
-    max_horizon: int | None = None
+    n_features: int = Field(..., gt=0)
+    feature_names: list[str] = Field(..., min_length=1)
+    steps_back: int = Field(..., gt=0)
+    max_horizon: int | None = Field(default=None, gt=0)
     value_range: dict[str, tuple[float, float]] = {}
     units: dict[str, str] = {}
+
+    @model_validator(mode="after")
+    def _names_match_count(self) -> InputSpec:
+        # Two fields encode the same fact; guard against a tampered or
+        # mis-written input_spec.json where they diverge. Pydantic's
+        # field-level constraints catch zero / negative; this catches the
+        # cross-field mismatch they can't express on their own.
+        if len(self.feature_names) != self.n_features:
+            raise ValueError(
+                f"feature_names has {len(self.feature_names)} entries "
+                f"but n_features={self.n_features}"
+            )
+        return self
 
     def validate(self, input_series: dict[str, list[float]]) -> None:
         """Raise ``ContractViolation`` on shape, name, or range mismatch.

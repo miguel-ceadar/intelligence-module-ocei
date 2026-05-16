@@ -274,10 +274,22 @@ def test_lstm_model_params_reject_non_positive(params, bad_field):
     ],
 )
 def test_arima_model_params_reject_negative(params, bad_field):
-    """ARIMA p/d/q must be non-negative; ``(0, 0, 0)`` is degenerate but
-    statsmodels' job to reject, not the schema's."""
+    """ARIMA p/d/q must be non-negative."""
     payload = {"kind": "arima", "features": [{"name": "cpu"}], "model_params": params}
     with pytest.raises(ValidationError, match=bad_field):
+        _parse(payload)
+
+
+def test_arima_model_params_reject_all_zero():
+    """``(0, 0, 0)`` is degenerate — statsmodels eventually raises but
+    only after several walk-forward fits cost real compute. Catch it at
+    schema time so the misconfig fails fast."""
+    payload = {
+        "kind": "arima",
+        "features": [{"name": "cpu"}],
+        "model_params": {"p": 0, "d": 0, "q": 0},
+    }
+    with pytest.raises(ValidationError, match="all zero"):
         _parse(payload)
 
 

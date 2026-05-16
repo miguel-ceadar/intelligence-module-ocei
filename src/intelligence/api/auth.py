@@ -26,6 +26,11 @@ _UNAUTHENTICATED_PATHS: frozenset[str] = frozenset(
         "/readyz",
         "/metrics",
         "/docs",
+        # FastAPI mounts the swagger OAuth2 redirect handler under /docs;
+        # without it, any swagger-driven OAuth flow would 401 on the
+        # callback. Listed explicitly so the allowlist stays exact-match
+        # (no prefix gymnastics).
+        "/docs/oauth2-redirect",
         "/redoc",
         "/openapi.json",
     }

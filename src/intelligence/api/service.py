@@ -208,7 +208,16 @@ def list_task_versions(task_name: str) -> dict:
     task = registry.get(task_name)
     bento_name = getattr(task, "bento_name", task_name)
 
-    artifacts = list_artifacts_by_name(bento_name)
+    try:
+        artifacts = list_artifacts_by_name(bento_name)
+    except Exception as e:
+        # PVC unmounted, store directory wiped, BentoML lock contention —
+        # anything that prevents enumerating the local store. Translate
+        # to 503 so callers retry rather than seeing an opaque 500.
+        raise HTTPException(
+            status_code=503,
+            detail=f"local model store unavailable: {type(e).__name__}: {e}",
+        ) from e
 
     return {
         "task": task_name,
@@ -276,17 +285,33 @@ def delete_task_version(task_name: str, version: str) -> dict:
 
 @app.get("/models")
 def list_models() -> dict:
-    """List Bento models in the local store.
+    """List Bento models in the local store written by this codebase.
 
-    ``bentoml.models.list()`` reads metadata only — does not load weights,
-    so this endpoint is cheap and doesn't break lazy loading.
+    Filters by the ``framework_name="intelligence"`` marker that
+    ``save_artifact`` stamps on every model context — keeps stray
+    bentos from unrelated projects on a shared ``BENTOML_HOME`` out of
+    the response. ``bentoml.models.list()`` reads metadata only — does
+    not load weights, so this endpoint is cheap and doesn't break
+    lazy loading.
     """
     import bentoml
 
-    models = bentoml.models.list()
+    try:
+        models = bentoml.models.list()
+    except Exception as e:
+        raise HTTPException(
+            status_code=503,
+            detail=f"local model store unavailable: {type(e).__name__}: {e}",
+        ) from e
+
+    ours = [
+        m
+        for m in models
+        if getattr(getattr(m.info, "context", None), "framework_name", None) == "intelligence"
+    ]
     return {
-        "count": len(models),
-        "models": [{"name": m.tag.name, "version": m.tag.version} for m in models],
+        "count": len(ours),
+        "models": [{"name": m.tag.name, "version": m.tag.version} for m in ours],
     }
 
 
